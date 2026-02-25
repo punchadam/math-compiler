@@ -26,10 +26,9 @@ struct Token {
 
     // overloads from number for readability in parser
     decltype(auto) value() { return number->value; }
-    bool isInt = number->isInt;
-    //bool isInt() { return number->isInt(); }
+    bool isInt() { return number.has_value() && number->isInt; }
 };
 
-bool Tokenize(const std::string& input, std::vector<Token> tokens);
+bool Tokenize(const std::string& input, std::vector<Token>& tokens);
 
 #endif

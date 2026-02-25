@@ -28,11 +28,19 @@ enum class SupportedCommands {
     frac,
     sqrt,
     cdot, times, div,
+
     sin, cos, tan, csc, sec, cot,
+    asin, acos, atan,
+    arcsin, arccos, arctan,
+
     log, ln, exp,
+
     pi, infty, e,
+
     sum, prod,
-    integrate, lim
+    integrate, lim,
+
+    operatorname    // custom ops like max, etc
 };
 
 #endif

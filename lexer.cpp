@@ -12,7 +12,7 @@ enum class State {
     Command
 };
 
-bool Tokenize(const std::string& input, std::vector<Token> tokens) {
+bool Tokenize(const std::string& input, std::vector<Token>& tokens) {
     State s = State::Start;
 
     std::string buffer; // stored lexeme
@@ -85,7 +85,7 @@ bool Tokenize(const std::string& input, std::vector<Token> tokens) {
             case State::NumberFrac: {
                 if (isdigit(c)) { buffer += static_cast<char>(c); break; }
                 
-                Number num{ std::stod(buffer), false };
+                Number num{ static_cast<i64>(std::stoll(buffer)), true };
                 commit(TokenType::Number, buffer, i, num);
                 s = State::Start;
                 if (c != '\0') --i;
@@ -129,4 +129,6 @@ bool Tokenize(const std::string& input, std::vector<Token> tokens) {
     }
     // after the loop, back to the start means it all got handled
     if (s == State::Start) return true;
+
+    return false;
 }

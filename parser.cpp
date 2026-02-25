@@ -203,7 +203,7 @@ NodeID Parser::parseFraction() {
                         i64 denominator = std::get<i64>(advance().number->value);
                         if (negativeDenominator) denominator = -denominator;
                         if (peek().is(TokenType::RBrace)) {
-                            advance;
+                            advance();
                             return _ast->addRational(numerator, denominator, p);
                         }
                     }

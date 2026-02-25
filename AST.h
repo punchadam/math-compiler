@@ -5,6 +5,7 @@
 #include <variant>
 
 struct NodeID {
+    // i is the index of this node in the arena
     size_t i = 0;
     static constexpr size_t noPosition = (size_t)-1;
     static NodeID None() { return NodeID{ noPosition }; }
@@ -37,15 +38,34 @@ struct IdentifierNode {
     size_t pos = 0;
 };
 
+enum class BinaryOpKind {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Power,
+
+    Equals,
+    NotEquals,
+    LessThan,
+    GreaterThan,
+    LessThanOrEqual,
+    GreaterThanOrEqual
+};
 struct BinaryOpNode {
-    std::string op;
+    BinaryOpKind bKind;
     NodeID left = NodeID::None();
     NodeID right = NodeID::None();
     size_t pos = 0;
 };
 
+enum class UnaryOpKind {
+    Negate,
+    Factorial,
+    Percent
+};
 struct UnaryOpNode {
-    std::string op;
+    UnaryOpKind uKind;
     NodeID inner = NodeID::None();
     size_t pos = 0;
 };
@@ -85,6 +105,60 @@ struct ASTNode {
 
     template <class T>
     ASTNode(T t) : kind(std::move(t)) {}
+};
+
+class AST {
+    public:
+        NodeID root = NodeID::None();
+
+        // storage arena for all nodes
+        std::vector<ASTNode> arena;
+
+        // modifiable reference
+        ASTNode& at(NodeID id) { return arena.at(id.i); }
+        // unmodifyiable
+        const ASTNode& at(NodeID id) const { return arena.at(id.i); }
+
+        void reserve(size_t n) { arena.reserve(n); }
+
+        // using "const" and "&" to avoid copying unneccessarily
+
+        NodeID addConstant(const ConstantKind& cKind, const size_t& pos) {
+            return addNode(ConstantNode{ cKind, pos });
+        }
+
+        NodeID addReal(const double& value, const size_t& pos) {
+            return addNode(RealNode{ value, pos });
+        }
+
+        NodeID addRational(const i64& numerator, const i64& denominator, const size_t& pos) {
+            return addNode(RationalNode{ numerator, denominator, pos });
+        }
+
+        NodeID addIdentifier(const std::string& name, const size_t& pos) {
+            return addNode(IdentifierNode{ name, pos });
+        }
+
+        NodeID addBinaryOp(const BinaryOpKind& bKind, const NodeID& left, const NodeID& right, const size_t& pos) {
+            return addNode(BinaryOpNode{ bKind, left, right, pos });
+        }
+
+        NodeID addUnaryOp(const UnaryOpKind& uKind, const NodeID& inner, const size_t& pos) {
+            return addNode(UnaryOpNode{ uKind, inner, pos });
+        }
+
+        NodeID addCall(const FunctionKind& fKind, const std::vector<NodeID>& args, const size_t& pos) {
+            return addNode(CallNode{ fKind, args, pos });
+        }
+    
+    private:
+        template <class T>
+        NodeID addNode(T t) {
+            // nodes.size() becomes i in NodeID
+            NodeID id{ arena.size() };
+            nodes.emplace_back(std::move(t));
+            return id;
+        }
 };
 
 #endif

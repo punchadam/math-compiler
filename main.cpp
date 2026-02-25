@@ -1,5 +1,4 @@
 #include "lexer.h"
-//#include <sstream>
 #include <iostream>
 
 void getInputString(std::string& input) {

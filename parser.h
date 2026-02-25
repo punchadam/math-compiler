@@ -15,7 +15,7 @@ This requires a technique called recursive descent.
     parse tree downwards to match the input tokens.
 
 Pratt parsing combines all rules into one function,
-called parseExpression(minBindingPower), that uses
+called parseExpression(minBP), that uses
 binding power to decide when to stop consuming tokens.
 
     Binding power: every operator has L and R binding power, which
@@ -45,15 +45,15 @@ There are 3 types of token in Pratt parsing:
 
 The core loop:
 
-    parseExpression(minBindingPower) :
+    parseExpression(minBP) :
         left_side = parsePrefix()     // consume one prefix thing
         loop:
             op = peek next token
-            if op is postfix anmd its left_bp >= minBindingPower:
+            if op is postfix anmd its left_bp >= minBP:
                 consume it
                 wrap left_side
                 continue
-            if op is infix and its left_bp >= minBindingPower:
+            if op is infix and its left_bp >= minBP:
                 consume it
                 right_side = parseExpression(right_bp)  // recurse
                 left_side = makeBinaryNode(op, left_side, right_side)
@@ -70,6 +70,109 @@ side can consume.
 #include "AST.h"
 #include "lexer.h"
 
+#include <unordered_map>
+#include <unordered_set>
 
+class Parser {
+    public:
+        bool parse(const std::vector<Token>& tokens, AST& outAST);
+
+    private:
+        // state of the entire class
+        const std::vector<Token>* _tokens = nullptr;
+        AST* _ast = nullptr;
+        size_t _pos = 0;
+
+        // returns a reference to the token at pos
+        const Token& peek() const;
+        // returns a reference to the current token, then moves forward
+        const Token& advance();
+        // asserts the current token matches, then advances past it
+        const Token& expect(const TokenType& type);
+
+        NodeID parseExpression(const u8& minBP);
+
+        NodeID parsePrefix();
+        NodeID parseNumber();               // rational or real
+        NodeID parseCommand();              // \sqrt{}, \pi
+        NodeID parseBraceGroup();           // {...}
+        NodeID parseLeftRight();            // \left(expr \right)
+        NodeID parseFraction();             // \frac{n}{d}
+        NodeID parseFunctionArg();          // \sin{x}, \sin x, or \sin(x + 1)
+        NodeID parseSingleArgFunction();    // sin(), ln()
+        NodeID parseOperatorName();         // \operatorname{name}(args...)
+        std::vector<NodeID> parseArgList(); // \max{arg1, arg2, arg3, etc}
+        
+        bool canImplicitMultiply() const;
+
+        bool floatToRational(double input, RationalNode output);
+};
+
+struct InfixInfo {
+    u8 leftBP;
+    u8 rightBP;
+    BinaryOpKind opKind;
+};
+
+// binding power of infix ops
+inline const std::unordered_map<TokenType, InfixInfo> INFIX_OPS = {
+    { TokenType::Equals,    { 1, 2, BinaryOpKind::Equals } },
+    { TokenType::Plus,      { 3, 4, BinaryOpKind::Add } },
+    { TokenType::Minus,     { 3, 4, BinaryOpKind::Subtract } },
+    { TokenType::Star,      { 5, 6, BinaryOpKind::Multiply } },
+    { TokenType::Slash,     { 5, 6, BinaryOpKind::Divide } },
+    { TokenType::Caret,     { 12, 11, BinaryOpKind::Power } }
+};
+
+// binding power of commands that act as infix ops
+inline const std::unordered_map<std::string, InfixInfo> INFIX_COMMAND_OPS = {
+    { "cdot",   { 5, 6, BinaryOpKind::Multiply } },
+    { "times",  { 5, 6, BinaryOpKind::Multiply } },
+    { "div",    { 5, 6, BinaryOpKind::Divide } }
+};
+
+// implicit multiplication uses the same precedence as explicit '*'
+inline constexpr InfixInfo IMPLICIT_MULTIPLY_OP = { 5, 6, BinaryOpKind::Multiply };
+
+// prefix unary operators only need a right binding power
+inline constexpr u8 PREFIX_UNARY_RBP = 9;
+
+// postfix operators only need a left binding power, which binds tightest
+inline constexpr u8 POSTFIX_LBP = 13;
+
+// maps commands to FunctionKind for single-arg functions
+inline const std::unordered_map<std::string, FunctionKind> FUNCTION_KIND_MAP = {
+    { "sin",    FunctionKind::Sine },
+    { "cos",    FunctionKind::Cosine },
+    { "tan",    FunctionKind::Tangent },
+    { "ln",     FunctionKind::NaturalLogarithm },
+    { "log",    FunctionKind::Logarithm },
+    { "exp",    FunctionKind::Exponential }
+};
+
+// maps multi-arg functions \operatorname{name} tp FunctionKind
+inline const std::unordered_map<std::string, FunctionKind> OPERATOR_NAME_MAP = {
+    { "max",    FunctionKind::Max },
+    { "min",    FunctionKind::Min },
+    { "atan2",  FunctionKind::Atan2 },
+    { "hypot",  FunctionKind::Hypotenuse },
+    { "abs",    FunctionKind::AbsoluteValue }
+};
+
+// maps commands to ConstantKind
+inline const std::unordered_map<std::string, ConstantKind> CONSTANT_MAP = {
+    { "pi",     ConstantKind::PI },
+    { "e",      ConstantKind::E }
+};
+
+// commands that can start a new expression for implicit multiplication
+inline const std::unordered_set<std::string> PREFIX_COMMANDS = {
+    "sin", "cos", "tan",
+    "ln", "log", "exp",
+    "pi", "e",
+    "sqrt", "frac",
+    "left", "operatorname",
+    "arcsin", "arccos", "arctan",
+};
 
 #endif

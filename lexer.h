@@ -56,14 +56,14 @@ enum class TokenType {
 struct Token {
     TokenType type;
     std::string lexeme;
-    std::optional<size_t> pos;
+    size_t pos;
     std::optional<Number> number;
 
     bool is(TokenType t) const { return type == t; }
 
     // overloads from number for readability in parser
     decltype(auto) value() { return number->value; }
-    bool isInt() { return number.has_value() && number->isInt; }
+    bool isInt() const { return number.has_value() && number->isInt; }
 };
 
 bool Tokenize(const std::string& input, std::vector<Token>& tokens);

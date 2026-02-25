@@ -14,17 +14,19 @@ very hard to implement on a simple stream of tokens,
 or even worse, on a raw ass string.
 
 Not gonna explain much more here, but here's one
-example just cause I'm nice:
+example with the right-sides labeled:
 
     "2 + 3 * (5 - 2)" becomes:
 
-      +
+      + <- ROOT (binary node)
      / \
-    2   *
+    2   * <- (binary node)
        / \
-      3   -
+      3   - <- (binary node)
          / \
-        5   2
+        5   2 <- (rational node)
+
+for more on ASTs, see https://medium.com/@jessica_lopez/basic-understanding-of-abstract-syntax-tree-ast-d40ff911c3bf
 
 This AST implementation is stored in a flat vector,\
 called an arena, and its storage structure is abstracted
@@ -46,6 +48,7 @@ node as one of its children, forming a tree structure.
 
 #include "lookupstuff.h"
 #include <variant>
+#include <numeric>
 
 struct NodeID {
     // i is the index of this node in the arena
@@ -166,40 +169,41 @@ class AST {
 
         // using "const" and "&" to avoid copying unneccessarily
 
-        NodeID addConstant(const ConstantKind& cKind, const size_t& pos) {
+        NodeID addConstant(const ConstantKind& cKind, const size_t& pos = UnknownPos) {
             return addNode(ConstantNode{ cKind, pos });
         }
 
-        NodeID addReal(const double& value, const size_t& pos) {
+        NodeID addReal(const double& value, const size_t& pos = UnknownPos) {
             return addNode(RealNode{ value, pos });
         }
 
-        NodeID addRational(const i64& numerator, const i64& denominator, const size_t& pos) {
-            return addNode(RationalNode{ numerator, denominator, pos });
+        NodeID addRational(const i64& numerator, const i64& denominator, const size_t& pos = UnknownPos) {
+            i64 commonDivisor = std::gcd(std::abs(numerator), std::abs(denominator));
+            return addNode(RationalNode{ numerator / commonDivisor, denominator / commonDivisor, pos });
         }
 
-        NodeID addIdentifier(const std::string& name, const size_t& pos) {
+        NodeID addIdentifier(const std::string& name, const size_t& pos = UnknownPos) {
             return addNode(IdentifierNode{ name, pos });
         }
 
-        NodeID addBinaryOp(const BinaryOpKind& bKind, const NodeID& left, const NodeID& right, const size_t& pos) {
+        NodeID addBinaryOp(const BinaryOpKind& bKind, const NodeID& left, const NodeID& right, const size_t& pos = UnknownPos) {
             return addNode(BinaryOpNode{ bKind, left, right, pos });
         }
 
-        NodeID addUnaryOp(const UnaryOpKind& uKind, const NodeID& inner, const size_t& pos) {
+        NodeID addUnaryOp(const UnaryOpKind& uKind, const NodeID& inner, const size_t& pos = UnknownPos) {
             return addNode(UnaryOpNode{ uKind, inner, pos });
         }
 
-        NodeID addCall(const FunctionKind& fKind, const std::vector<NodeID>& args, const size_t& pos) {
+        NodeID addCall(const FunctionKind& fKind, const std::vector<NodeID>& args, const size_t& pos = UnknownPos) {
             return addNode(CallNode{ fKind, args, pos });
         }
     
     private:
         template <class T>
         NodeID addNode(T t) {
-            // nodes.size() becomes i in NodeID
+            // arena.size() becomes i in NodeID
             NodeID id{ arena.size() };
-            nodes.emplace_back(std::move(t));
+            arena.emplace_back(std::move(t));
             return id;
         }
 };

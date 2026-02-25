@@ -17,6 +17,8 @@ typedef int16_t i16;
 typedef int32_t i32;
 typedef int64_t i64;
 
+static constexpr size_t UnknownPos = (size_t)-1;
+
 struct Number {
     std::variant<double, i64> value;
     bool isInt = false;

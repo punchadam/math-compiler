@@ -23,6 +23,7 @@ struct Number {
     //bool isInt() { return std::holds_alternative<i64>(value); }
 };
 
+// the supported latex commands that follow a '\'
 enum class SupportedCommands {
     left, right,
     frac,

@@ -1,6 +1,49 @@
 #ifndef AST_H
 #define AST_H
 
+/*
+The Abstract Syntax Tree (AST)
+
+This is super important in understanding what's
+happening here. The parser will turn a list of tokens
+into a tree, in which each branch is a bound expression
+and the root node is usually some sort of operator.
+This encodes order, and allows us to do some cool
+simplification and solving tricks that would be otherwise
+very hard to implement on a simple stream of tokens,
+or even worse, on a raw ass string.
+
+Not gonna explain much more here, but here's one
+example just cause I'm nice:
+
+    "2 + 3 * (5 - 2)" becomes:
+
+      +
+     / \
+    2   *
+       / \
+      3   -
+         / \
+        5   2
+
+This AST implementation is stored in a flat vector,\
+called an arena, and its storage structure is abstracted
+by the helper methods like at() and all of those add_()s.
+
+Each node in the tree can be one of the below
+node structs:
+    - Constant (like pi, e, i)
+    - Real (stored as a double)
+    - Rational (stored as i64s numerator & denominator)
+    - Identifier (like x, theta, etc)
+    - Binary Operation (left child and right child)
+    - Unary Operation (inner child)
+    - Function call (like sin(, max(, etc wiht a vector of arguments)
+
+Every operation or function call can have ANY other
+node as one of its children, forming a tree structure.
+*/
+
 #include "lookupstuff.h"
 #include <variant>
 
@@ -45,12 +88,12 @@ enum class BinaryOpKind {
     Divide,
     Power,
 
-    Equals,
-    NotEquals,
-    LessThan,
-    GreaterThan,
-    LessThanOrEqual,
-    GreaterThanOrEqual
+    Equals
+    // NotEquals,
+    // LessThan,
+    // GreaterThan,
+    // LessThanOrEqual,
+    // GreaterThanOrEqual
 };
 struct BinaryOpNode {
     BinaryOpKind bKind;

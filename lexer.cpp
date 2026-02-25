@@ -36,7 +36,11 @@ bool Tokenize(const std::string& input, std::vector<Token>& tokens) {
 
         switch (s) {
             case State::Start: {
-                if (c == '\0') { return true; } // end the token stream successfully
+                if (c == '\0') {
+                    // End sentinel token at the end + 1
+                    commit(TokenType::End, "", input.size());
+                    return true;
+                }
 
                 // ignore spaces at the start of a token
                 if (isspace(c)) { break; }
@@ -128,7 +132,9 @@ bool Tokenize(const std::string& input, std::vector<Token>& tokens) {
         }
     }
     // after the loop, back to the start means it all got handled
-    if (s == State::Start) return true;
+    if (s == State::Start) {
+        return true;
+    }
 
     return false;
 }

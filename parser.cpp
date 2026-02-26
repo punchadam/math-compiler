@@ -277,6 +277,44 @@ bool Parser::canImplicitMultiply() const {
     return false;
 }
 
-bool Parser::floatToRational(double input, RationalNode output) {
-    return false;
+// stern brocot search for a fraction approx of a float
+bool Parser::floatToRational(const double& input, RationalNode& output) {
+    bool canRationalize = false;
+    bool isNegative = false;
+
+    const double maxError = 1e-12;
+    const u16 maxDenominator = 1000;
+
+    i64 wholePart = (i64)input;
+    double fractionalPart = (double)(input - wholePart);
+
+    i64 numL = 0;   i64 numR = 1;
+    i64 denL = 1;   i64 denR = 1;
+
+    while (true) {
+
+        
+
+        if (std::abs(fractionalPart - mediant) <= maxError) {
+            output = { numMediant, denMediant, UnknownPos };
+            canRationalize = true;
+            break;
+        }
+
+        i64 numMediant = numL + numR;
+        i64 denMediant = denL + denR;
+        double mediant = numMediant / denMediant;
+
+        if (denMediant > maxDenominator) break;
+
+        if (mediant < fractionalPart) {
+            numL = numMediant;
+            denL = denMediant;
+        } else if (mediant > fractionalPart) {
+            numR = numMediant;
+            denR = denMediant;
+        }
+    }
+    
+    return canRationalize;
 }

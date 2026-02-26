@@ -105,7 +105,7 @@ class Parser {
         
         bool canImplicitMultiply() const;
 
-        bool floatToRational(double input, RationalNode output);
+        bool floatToRational(const double& input, RationalNode& output);
 };
 
 struct InfixInfo {

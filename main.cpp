@@ -10,10 +10,16 @@ bool getInputString(std::string& input) {
 }
 
 int main(void) {
-    std::string input;
     Parser parser;
     AST ast;
 
+    i64 n, d;
+    double test = 0.125;
+    std::cout << "Fraction Representation of Number 0.125:\n";
+    if (parser.doubleToRational(test, n, d)) std::cout << n << "/" << d << '\n';
+    else std::cout << "Unable to parse float.\n";
+    
+    std::string input;
     while (getInputString(input)) {
         std::vector<Token> tokens;
         if (!Tokenize(input, tokens)) return 1;
@@ -23,5 +29,6 @@ int main(void) {
         }
         parser.parse(tokens, ast);
     }
+
     return 0;
 }

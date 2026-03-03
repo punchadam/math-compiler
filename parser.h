@@ -76,6 +76,8 @@ side can consume.
 class Parser {
     public:
         bool parse(const std::vector<Token>& tokens, AST& outAST);
+        
+        bool doubleToRational(const double& input, i64& outNumerator, i64& outDenominator);
 
     private:
         // state of the entire class
@@ -98,14 +100,12 @@ class Parser {
         NodeID parseBraceGroup();           // {...}
         NodeID parseLeftRight();            // \left(expr \right)
         NodeID parseFraction();             // \frac{n}{d}
-        NodeID parseFunctionArg();          // \sin{x}, \sin x, or \sin(x + 1)
+        //NodeID parseFunctionArg();          // \sin{x}, \sin x, or \sin(x + 1)
         NodeID parseSingleArgFunction();    // sin(), ln()
         NodeID parseOperatorName();         // \operatorname{name}(args...)
         std::vector<NodeID> parseArgList(); // \max{arg1, arg2, arg3, etc}
         
         bool canImplicitMultiply() const;
-
-        bool floatToRational(const double& input, RationalNode& output);
 };
 
 struct InfixInfo {
@@ -114,7 +114,7 @@ struct InfixInfo {
     BinaryOpKind opKind;
 };
 
-// binding power of infix ops
+// infix ops
 inline const std::unordered_map<TokenType, InfixInfo> INFIX_OPS = {
     { TokenType::Equals,    { 1, 2, BinaryOpKind::Equals } },
     { TokenType::Plus,      { 3, 4, BinaryOpKind::Add } },
@@ -124,15 +124,12 @@ inline const std::unordered_map<TokenType, InfixInfo> INFIX_OPS = {
     { TokenType::Caret,     { 12, 11, BinaryOpKind::Power } }
 };
 
-// binding power of commands that act as infix ops
+// commands that act as infix ops
 inline const std::unordered_map<std::string, InfixInfo> INFIX_COMMAND_OPS = {
     { "cdot",   { 5, 6, BinaryOpKind::Multiply } },
     { "times",  { 5, 6, BinaryOpKind::Multiply } },
     { "div",    { 5, 6, BinaryOpKind::Divide } }
 };
-
-// implicit multiplication uses the same precedence as explicit '*'
-inline constexpr InfixInfo IMPLICIT_MULTIPLY_OP = { 5, 6, BinaryOpKind::Multiply };
 
 // prefix unary operators only need a right binding power
 inline constexpr u8 PREFIX_UNARY_RBP = 9;

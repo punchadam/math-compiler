@@ -62,7 +62,7 @@ struct Token {
     bool is(TokenType t) const { return type == t; }
 
     // overloads from number for readability in parser
-    decltype(auto) value() { return number->value; }
+    //decltype(auto) value() { return number->value; }
     bool isInt() const { return number.has_value() && number->isInt; }
 };
 

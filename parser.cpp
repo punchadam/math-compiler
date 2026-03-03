@@ -53,12 +53,9 @@ NodeID Parser::parseExpression(const u8& minBP) {
         }
 
         // infix commands
-        if (t.is(TokenType::Command) &&
-            (t.lexeme == "cdot" || t.lexeme == "times" || t.lexeme == "div"))
-        {
+        if (auto it = INFIX_COMMAND_OPS.find(t.lexeme); it != INFIX_COMMAND_OPS.end()) {
             if (5 < minBP) break;
-            BinaryOpKind kind = (t.lexeme == "div")
-                ? BinaryOpKind::Divide : BinaryOpKind::Multiply;
+            BinaryOpKind kind = (t.lexeme == "div") ? BinaryOpKind::Divide : BinaryOpKind::Multiply;
             size_t p = advance().pos;
             NodeID rightSide = parseExpression(6);
             leftSide = _ast->addBinaryOp(kind, leftSide, rightSide, p);
@@ -67,10 +64,11 @@ NodeID Parser::parseExpression(const u8& minBP) {
 
         // implicit multiplication
         if (canImplicitMultiply()) {
-            auto [leftBP, rightBP, opKind] = IMPLICIT_MULTIPLY_OP;
+            u8 leftBP = 5;
+            u8 rightBP = 6;
             if (leftBP < minBP) break;
             NodeID rightSide = parseExpression(rightBP);
-            leftSide = _ast->addBinaryOp(opKind, leftSide, rightSide, peek().pos);
+            leftSide = _ast->addBinaryOp(BinaryOpKind::Multiply, leftSide, rightSide, peek().pos);
             continue;
         }
 
@@ -180,38 +178,59 @@ NodeID Parser::parseLeftRight() {
 }
 
 NodeID Parser::parseFraction() {
+    // consume "\frac"
     size_t p = advance().pos;
 
     // store the original pos so we can use advance freely
     size_t saved = _pos;
 
-    // fast path to a rational node if both n & d are integers
+    // fast path if numerator and denominator can be rationalized
     if (peek().is(TokenType::LBrace)) {
         advance();
         bool negativeNumerator = peek().is(TokenType::Minus);
-        if (negativeNumerator) { advance(); }
-        if (peek().is(TokenType::Number) && peek().isInt()) {
-            i64 numerator = std::get<i64>(advance().number->value);
-            if (negativeNumerator) numerator = -numerator;
-            if (peek().is(TokenType::RBrace)) {
+        if (negativeNumerator) advance();
+        if (peek().is(TokenType::Number)) {
+            i64 n_numerator, n_denominator = 1;
+            bool gotNumerator = false;
+            if (peek().isInt()) {
+                n_numerator = std::get<i64>(advance().number->value);
+                gotNumerator = true;
+            } else {
+                double val = std::get<double>(advance().number->value);
+                gotNumerator = doubleToRational(val, n_numerator, n_denominator);
+            }
+
+            if (negativeNumerator) n_numerator = -n_numerator;
+
+            if (gotNumerator && peek().is(TokenType::RBrace)) {
                 advance();
-                if (peek().is(TokenType::LBrace)) {
-                    advance();
-                    bool negativeDenominator = peek().is(TokenType::Minus);
-                    if (negativeDenominator) { advance(); }
-                    if (peek().is(TokenType::Number) && peek().isInt())  {
-                        i64 denominator = std::get<i64>(advance().number->value);
-                        if (negativeDenominator) denominator = -denominator;
-                        if (peek().is(TokenType::RBrace)) {
-                            advance();
-                            return _ast->addRational(numerator, denominator, p);
-                        }
+                bool negativeDenominator = peek().is(TokenType::Minus);
+                if (negativeDenominator) advance();
+                if (peek().is(TokenType::Number)) {
+                    i64 d_numerator, d_denominator = 1;
+                    bool gotDenominator = false;
+                    if (peek().isInt()) {
+                        d_numerator = std::get<i64>(advance().number->value);
+                        gotDenominator = true;
+                    } else {
+                        double val = std::get<double>(advance().number->value);
+                        gotDenominator = doubleToRational(val, d_numerator, d_denominator);
                     }
-                }
+
+                    if (negativeDenominator) d_numerator = -d_numerator;
+
+                    if (gotDenominator && peek().is(TokenType::RBrace)) {
+                        advance();
+                        i64 final_numerator = d_denominator * n_numerator;
+                        i64 final_denominator = n_denominator * d_numerator;
+                        return _ast->addRational(final_numerator, final_denominator, p);
+                    }
+                } 
             }
         }
     }
 
+    // slow path for whatever else
     _pos = saved;
     NodeID numerator = parseBraceGroup();
     NodeID denominator = parseBraceGroup();
@@ -277,36 +296,45 @@ bool Parser::canImplicitMultiply() const {
     return false;
 }
 
-// stern brocot search for a fraction approx of a float
-bool Parser::floatToRational(const double& input, RationalNode& output) {
+// stern brocot search for a fraction approx of a double
+bool Parser::doubleToRational(const double& input, i64& outNumerator, i64& outDenominator) {
+    // easier for sign stuff
+    double value = input;
+    
     bool canRationalize = false;
     bool isNegative = false;
 
     const double maxError = 1e-12;
     const u16 maxDenominator = 1000;
 
-    i64 wholePart = (i64)input;
-    double fractionalPart = (double)(input - wholePart);
+    if (value < 0) {
+        isNegative = true;
+        value = -value;
+    }
+
+    i64 wholePart = (i64)value;
+    double fractionalPart = (double)(value - wholePart);
 
     i64 numL = 0;   i64 numR = 1;
     i64 denL = 1;   i64 denR = 1;
 
-    while (true) {
+    while (denL + denR <= maxDenominator) {
 
-        
+        // calculate the mediant as fraction and double
+        i64 numMediant = numL + numR;
+        i64 denMediant = denL + denR;
+        double mediant = (double)numMediant / (double)denMediant;
 
+        // determine if the mediant is close enough to the input
         if (std::abs(fractionalPart - mediant) <= maxError) {
-            output = { numMediant, denMediant, UnknownPos };
+            outDenominator = denMediant;
+            outNumerator = numMediant + wholePart * outDenominator;
+            if (isNegative) outNumerator = -outNumerator;
             canRationalize = true;
             break;
         }
 
-        i64 numMediant = numL + numR;
-        i64 denMediant = denL + denR;
-        double mediant = numMediant / denMediant;
-
-        if (denMediant > maxDenominator) break;
-
+        // set bounds based on mediant
         if (mediant < fractionalPart) {
             numL = numMediant;
             denL = denMediant;

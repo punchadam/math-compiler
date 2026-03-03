@@ -38,6 +38,7 @@ of characters to extract meaning.
 */
 
 #include "lookupstuff.h"
+#include "Error.h"
 
 enum class TokenType {
     Number,

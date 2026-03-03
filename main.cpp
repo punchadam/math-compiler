@@ -1,6 +1,7 @@
 #include "lexer.h"
 #include "parser.h"
 #include <iostream>
+#include "Error.h"
 
 bool getInputString(std::string& input) {
     std::cout << "Math Compiler v0.0.0\n\n\tInput Expression:\t";

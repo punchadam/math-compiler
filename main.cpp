@@ -1,34 +1,50 @@
 #include "lexer.h"
 #include "parser.h"
 #include <iostream>
-#include "Error.h"
 
 bool getInputString(std::string& input) {
-    std::cout << "Math Compiler v0.0.0\n\n\tInput Expression:\t";
+    input.clear();
+    std::cout << "\tInput Expression:\t";
     std::cin >> input;
     if (input == "n" || input == "no" || input == "N" || input == "No" || input == "NO") return false;
     return true;
 }
 
 int main(void) {
-    Parser parser;
-    AST ast;
-
-    i64 n, d;
-    double test = 0.125;
-    std::cout << "Fraction Representation of Number 0.125:\n";
-    if (parser.doubleToRational(test, n, d)) std::cout << n << "/" << d << '\n';
-    else std::cout << "Unable to parse float.\n";
+    std::cout << "Math Compiler v0.0.0\n\n";
     
     std::string input;
     while (getInputString(input)) {
+        AST ast;
+        Parser p;
         std::vector<Token> tokens;
-        if (!Tokenize(input, tokens)) return 1;
-        std::cout << "\nTokens:\n";
-        for (Token t : tokens) {
-            std::cout << t.lexeme << "\n";
+        
+        try {
+            Tokenize(input, tokens);
+        } catch (LexerError& e) {
+            std::cerr << "Tokenize error at position " << e.pos << ": " << e.what() << "\n";
+            return 1;
+        } catch (std::exception& e) {
+            std::cerr << "Unexpected error " << e.what() << "\n";
         }
-        parser.parse(tokens, ast);
+
+        std::cout << "\nTokens:\n[ ";
+        for (Token t : tokens) {
+            std::cout << t.lexeme;
+            if (!t.is(TokenType::End)) std::cout << ",";
+            std::cout << " ";
+        }
+        std::cout << "]\n";
+
+        try {
+            p.parse(tokens, ast);
+        } catch (ParserError& e) {
+            std::cerr << "Parser error at position " << e.pos << ": " << e.what() << "\n";
+        } catch (std::exception& e) {
+            std::cerr << "Unexpected error " << e.what() << "\n";
+        }
+
+        //std::cout << "If this isn't reached, parser is fucked\n\n";
     }
 
     return 0;

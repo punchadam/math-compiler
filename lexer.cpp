@@ -1,4 +1,5 @@
 #include "lexer.h"
+#include "Error.h"
 
 enum class State {
     Start,
@@ -12,7 +13,7 @@ enum class State {
     Command
 };
 
-bool Tokenize(const std::string& input, std::vector<Token>& tokens) {
+void Tokenize(const std::string& input, std::vector<Token>& tokens) {
     State s = State::Start;
 
     std::string buffer; // stored lexeme
@@ -38,8 +39,8 @@ bool Tokenize(const std::string& input, std::vector<Token>& tokens) {
             case State::Start: {
                 if (c == '\0') {
                     // End sentinel token at the end + 1
-                    commit(TokenType::End, "", input.size());
-                    return true;
+                    commit(TokenType::End, "End", input.size());
+                    return;
                 }
 
                 // ignore spaces at the start of a token
@@ -67,7 +68,8 @@ bool Tokenize(const std::string& input, std::vector<Token>& tokens) {
                 if (c == '_') { commit(TokenType::Underscore, "_", i); break; }
                 if (c == '=') { commit(TokenType::Equals, "=", i); break; }
 
-                return false;
+                std::string msg = "Unexpected character '" + c + '\'';
+                throw LexerError(i, msg);
             }
 
             case State::Number: {
@@ -77,14 +79,16 @@ bool Tokenize(const std::string& input, std::vector<Token>& tokens) {
                 if (c == 'e' || c == 'E') { buffer += static_cast<char>(c); s = State::NumberExpMark; break; }
                 
                 Number num{ std::stoi(buffer), true };  // state stayed within number, commit an int
-                commit(TokenType::Number, buffer, i, num);
+                commit(TokenType::Number, buffer, startPos, num);
                 s = State::Start;
-                if (c != '\0') --i;
+                --i;
                 break;
             }
             case State::NumberFracMark: {
                 if (isdigit(c)) { buffer += static_cast<char>(c); s = State::NumberFrac; break; }
-                return false;
+                
+                std::string msg = "Expected digit after '.', instead got '" + c + '\'';
+                throw LexerError(i, msg);
             }
             case State::NumberFrac: {
                 if (isdigit(c)) { buffer += static_cast<char>(c); break; }
@@ -92,17 +96,21 @@ bool Tokenize(const std::string& input, std::vector<Token>& tokens) {
                 Number num{ static_cast<i64>(std::stoll(buffer)), true };
                 commit(TokenType::Number, buffer, i, num);
                 s = State::Start;
-                if (c != '\0') --i;
+                --i;
                 break;
             }
             case State::NumberExpMark: {
                 if (isdigit(c)) { buffer += static_cast<char>(c); s = State::NumberExp; break; }
                 if (c == '-') { buffer += '-'; s = State::NumberExpSign; break; }
-                return false;
+                
+                std::string msg = "Expected digit or sign after 'E', instead got '" + c + '\'';
+                throw LexerError(i, msg);
             }
             case State::NumberExpSign: {
                 if (isdigit(c)) { buffer += static_cast<char>(c); s = State::NumberExp; break; }
-                return false;
+                
+                std::string msg = "Expected digit after \"E(sign)\", instead got '" + c + '\'';
+                throw LexerError(i, msg);
             }
             case State::NumberExp: {
                 if (isdigit(c)) { buffer += static_cast<char>(c); break; }
@@ -110,7 +118,7 @@ bool Tokenize(const std::string& input, std::vector<Token>& tokens) {
                 Number num{ std::stod(buffer), false };
                 commit(TokenType::Number, buffer, i, num);
                 s = State::Start;
-                if (c != '\0') --i;
+                --i;
                 break;
             }
             case State::Identifier: {
@@ -118,7 +126,7 @@ bool Tokenize(const std::string& input, std::vector<Token>& tokens) {
 
                 commit(TokenType::Identifier, buffer, startPos);
                 s = State::Start;
-                if (c != '\0') --i;
+                --i;
                 break;
             }
             case State::Command: {
@@ -126,15 +134,18 @@ bool Tokenize(const std::string& input, std::vector<Token>& tokens) {
 
                 commit(TokenType::Command, buffer, startPos);
                 s = State::Start;
-                if (c != '\0') --i;
+                --i;
                 break;
             }
         }
     }
     // after the loop, back to the start means it all got handled
     if (s == State::Start) {
-        return true;
+        return;
     }
 
-    return false;
+    std::string msg = "Internal lexer error. Reached end of input without sentinel";
+    throw LexerError(UnknownPos, msg);
+
+    return;
 }

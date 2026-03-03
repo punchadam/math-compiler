@@ -67,6 +67,6 @@ struct Token {
     bool isInt() const { return number.has_value() && number->isInt; }
 };
 
-bool Tokenize(const std::string& input, std::vector<Token>& tokens);
+void Tokenize(const std::string& input, std::vector<Token>& tokens);
 
 #endif

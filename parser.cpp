@@ -1,14 +1,19 @@
 #include "parser.h"
 
 #include <stdexcept>
+#include <iostream>
 
-bool Parser::parse(const std::vector<Token>& tokens, AST& outAST) {
+void Parser::parse(const std::vector<Token>& tokens, AST& outAST) {
     _tokens = &tokens;
     _ast = &outAST;
 
     _ast->root = parseExpression(0);
 
-    return peek().is(TokenType::End);
+    if (peek().is(TokenType::End)) return;
+    else {
+        std::string msg = "Function parseExpression() didn't reach end of token stream";
+        throw ParserError(_pos, msg);
+    }
 }
 
 
@@ -32,7 +37,14 @@ const Token& Parser::expect(const TokenType& type) {
 NodeID Parser::parseExpression(const u8& minBP) {
     NodeID leftSide = parsePrefix();
 
+    size_t iteration = 0;
+    size_t MAX_ITERATIONS = 10000;
     while (true) {
+        if (++iteration >= MAX_ITERATIONS) {
+            std::string msg = "Infinite Loop on Token: \"" + peek().lexeme + "\", Type: " + std::to_string(static_cast<int>(peek().type));
+            throw ParserError(_pos, msg);
+        }
+
         const Token& t = peek();
 
         // postfix ops
@@ -40,6 +52,7 @@ NodeID Parser::parseExpression(const u8& minBP) {
             if (POSTFIX_LBP < minBP) break;
             size_t p = advance().pos;
             leftSide = _ast->addUnaryOp(UnaryOpKind::Factorial, leftSide, p);
+            continue;
         }
 
         // infix ops
@@ -67,8 +80,9 @@ NodeID Parser::parseExpression(const u8& minBP) {
             u8 leftBP = 5;
             u8 rightBP = 6;
             if (leftBP < minBP) break;
+            size_t p = peek().pos;
             NodeID rightSide = parseExpression(rightBP);
-            leftSide = _ast->addBinaryOp(BinaryOpKind::Multiply, leftSide, rightSide, peek().pos);
+            leftSide = _ast->addBinaryOp(BinaryOpKind::Multiply, leftSide, rightSide, p);
             continue;
         }
 
@@ -110,11 +124,12 @@ NodeID Parser::parsePrefix() {
         return parseCommand();
     }
 
-    throw std::runtime_error("unexpected token at pos " + std::to_string(t.pos));
+    std::string msg = "Unexpected token: \"" + t.lexeme + "\"";
+    throw ParserError(_pos, msg);
 }
 
 NodeID Parser::parseNumber() {
-    const Token& t = peek();
+    const Token& t = advance();
     if (t.isInt()) {
         return _ast->addRational(std::get<i64>(t.number->value), 1, t.pos);
     }
@@ -155,7 +170,8 @@ NodeID Parser::parseCommand() {
         return parseLeftRight();
     }
 
-    throw std::runtime_error("unknown command: \\" + cmd);
+    std::string msg = "Unknown command: \\" + cmd;
+    throw ParserError(_pos, msg);
 }
 
 NodeID Parser::parseBraceGroup() {
@@ -170,7 +186,9 @@ NodeID Parser::parseLeftRight() {
     expect(TokenType::LParenthesis);
     NodeID inner = parseExpression(0);
     if (!peek().is(TokenType::Command) || peek().lexeme != "right") {
-        throw std::runtime_error("expected \\right");
+        
+        std::string msg = "Expected \"\\right\", got \"" + peek().lexeme + "\"";
+        throw ParserError(_pos, msg);
     }
     advance();
     expect(TokenType::RParenthesis);
@@ -265,7 +283,9 @@ NodeID Parser::parseOperatorName() {
 
     auto it = OPERATOR_NAME_MAP.find(name.lexeme);
     if (it == OPERATOR_NAME_MAP.end()) {
-        throw std::runtime_error("unknown operatorname: " + name.lexeme);
+
+        std::string msg = "Unknown operatorname: \"" + name.lexeme + "\"";
+        throw ParserError(_pos, msg);
     }
 
     expect(TokenType::LParenthesis);
@@ -289,7 +309,7 @@ std::vector<NodeID> Parser::parseArgList() {
 bool Parser::canImplicitMultiply() const {
     const Token& t = peek();
     if (t.is(TokenType::Number)) return true;
-    if (t.is(TokenType::Identifier)) return t.lexeme == "!";
+    if (t.is(TokenType::Identifier)) return t.lexeme != "!";
     if (t.is(TokenType::LParenthesis)) return true;
     if (t.is(TokenType::LBrace)) return true;
     if (t.is(TokenType::Command)) return PREFIX_COMMANDS.count(t.lexeme) > 0;

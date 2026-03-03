@@ -75,7 +75,7 @@ side can consume.
 
 class Parser {
     public:
-        bool parse(const std::vector<Token>& tokens, AST& outAST);
+        void parse(const std::vector<Token>& tokens, AST& outAST);
         
         bool doubleToRational(const double& input, i64& outNumerator, i64& outDenominator);
 

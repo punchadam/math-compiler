@@ -2,14 +2,25 @@
 #include <cmath>
 
 NodeID transform(const AST& input, AST& output) {
-    AST a, b, c, d;
+    AST current;
+    current.root = cloneSubtree(input, input.root, current);
 
-    a.root = foldConstants(input, input.root, a);
-    b.root = eliminateSubtraction(a, a.root, b);
-    c.root = simplifyIdentities(b, b.root, c);
-    d.root = applyTrigIdentities(c, c.root, d);
-    output.root = canonicalizeLogExp(d, d.root, output);
+    while (true) {
+        AST a, b, c, d, next;
+        a.root = foldConstants(current, current.root, a);
+        b.root = eliminateSubtraction(a, a.root, b);
+        c.root = simplifyIdentities(b, b.root, c);
+        d.root = applyTrigIdentities(c, c.root, d);
+        next.root = canonicalizeLogExp(d, d.root, next);
 
+        if (next.arena.size() == current.arena.size()) {
+            current = std::move(next);
+            break;
+        }
+        current = std::move(next);
+    }
+
+    output.root = cloneSubtree(current, current.root, output);
     return output.root;
 }
 
@@ -178,4 +189,82 @@ NodeID eliminateSubtraction(const AST& input, const NodeID& id, AST& output) {
     }
 
     return cloneSubtree(input, id, output);
+}
+
+NodeID simplifyIdentities(const AST& input, const NodeID & id, AST& output) {
+    if (id.isNone()) return NodeID::None();
+
+    if (isConstant(input, id) || isReal(input, id) || isRational(input, id)) {
+        return cloneSubtree(input, id, output);
+    }
+
+    if (auto b = getBinaryOp(input, id)) {
+        NodeID left = simplifyIdentities(input, b->left, output);
+        NodeID right = simplifyIdentities(input, b->right, output);
+
+        switch (b->bKind) {
+            case BinaryOpKind::Add: {
+                if (isZero(output, right)) return left;
+                if (isZero(output, left)) return right;
+                break;
+            }
+            case BinaryOpKind::Multiply: {
+                if (isZero(output, left) || isZero(output, right)) return output.addRational(0, 1);
+                if (isOne(output, left)) return right;
+                if (isOne(output, right)) return left;
+                if (isNegativeOne(output, left)) return makeNeg(output, right);
+                if (isNegativeOne(output, right)) return makeNeg(output, left);
+                break;
+            }
+            case BinaryOpKind::Divide: {
+                if (isZero(output, left)) return output.addRational(0, 1);
+                if (isOne(output, right)) return left;
+                if (isRational(output, left) && isRational(output, right)) {
+                    auto l = *getRational(output, left);
+                    auto r = *getRational(output, right);
+                    if (!isZero(r)) {
+                        return output.addRational(l.numerator * r.denominator, l.denominator * r.numerator);
+                    }
+                }
+                break;
+            }
+            case BinaryOpKind::Power: {
+                if (isZero(output, right)) return output.addRational(1, 1);
+                if (isOne(output, right)) return left;
+                if (isZero(output, left) && isPositive(output, right)) return output.addRational(0, 1);
+                if (isOne(output, left)) return output.addRational(1, 1);
+                break;
+            }
+            default: break;
+        }
+        return output.addBinaryOp(b->bKind, left, right);
+    }
+
+    if (auto u = getUnaryOp(input, id)) {
+        NodeID inner = simplifyIdentities(input, u->inner, output);
+        return output.addUnaryOp(u->uKind, inner);
+    }
+
+    if (auto c = getCall(input, id)) {
+        std::vector<NodeID> args;
+        args.reserve(c->args.size());
+        for (const NodeID& arg : c->args) {
+            args.emplace_back(simplifyIdentities(input, arg, output));
+        }
+        return output.addCall(c->fKind, args);
+    }
+    
+    return cloneSubtree(input, id, output);
+}
+
+NodeID applyTrigIdentities(const AST& input, const NodeID id, AST& output) {
+
+}
+
+NodeID canonicalizeLogExp(const AST& input, const NodeID id, AST& output) {
+
+}
+
+std::optional<NodeID> tryFoldTrig(FunctionKind fKind, const AST& ast, const NodeID& arg, AST& out) {
+
 }

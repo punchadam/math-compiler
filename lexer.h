@@ -1,6 +1,3 @@
-#ifndef LEXER_H
-#define LEXER_H
-
 /*
 State-Machine Lexer
 
@@ -36,6 +33,9 @@ The parser can now work with a stream of useful info,
 instead of having to sift through an ambiguous string
 of characters to extract meaning.
 */
+
+#ifndef LEXER_H
+#define LEXER_H
 
 #include "lookupstuff.h"
 #include "Error.h"

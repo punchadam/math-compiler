@@ -1,6 +1,3 @@
-#ifndef PARSER_H
-#define PARSER_H
-
 /*
 Pratt Parsing
 
@@ -66,6 +63,8 @@ It determines how much of the remaining tokens the right
 side can consume.
 */
 
+#ifndef PARSER_H
+#define PARSER_H
 
 #include "AST.h"
 #include "lexer.h"

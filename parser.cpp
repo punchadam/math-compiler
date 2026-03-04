@@ -3,9 +3,9 @@
 #include <stdexcept>
 #include <iostream>
 
-void Parser::parse(const std::vector<Token>& tokens, AST& outAST) {
+void Parser::parse(const std::vector<Token>& tokens, AST& ast) {
     _tokens = &tokens;
-    _ast = &outAST;
+    _ast = &ast;
 
     _ast->root = parseExpression(0);
 
@@ -315,55 +315,4 @@ bool Parser::canImplicitMultiply() const {
     if (t.is(TokenType::LBrace)) return true;
     if (t.is(TokenType::Command)) return PREFIX_COMMANDS.count(t.lexeme) > 0;
     return false;
-}
-
-// stern brocot search for a fraction approx of a double
-bool Parser::doubleToRational(const double& input, i64& outNumerator, i64& outDenominator) {
-    // easier for sign stuff
-    double value = input;
-    
-    bool canRationalize = false;
-    bool isNegative = false;
-
-    const double maxError = 1e-12;
-    const u16 maxDenominator = 1000;
-
-    if (value < 0) {
-        isNegative = true;
-        value = -value;
-    }
-
-    i64 wholePart = (i64)value;
-    double fractionalPart = (double)(value - wholePart);
-
-    i64 numL = 0;   i64 numR = 1;
-    i64 denL = 1;   i64 denR = 1;
-
-    while (denL + denR <= maxDenominator) {
-
-        // calculate the mediant as fraction and double
-        i64 numMediant = numL + numR;
-        i64 denMediant = denL + denR;
-        double mediant = (double)numMediant / (double)denMediant;
-
-        // determine if the mediant is close enough to the input
-        if (std::abs(fractionalPart - mediant) <= maxError) {
-            outDenominator = denMediant;
-            outNumerator = numMediant + wholePart * outDenominator;
-            if (isNegative) outNumerator = -outNumerator;
-            canRationalize = true;
-            break;
-        }
-
-        // set bounds based on mediant
-        if (mediant < fractionalPart) {
-            numL = numMediant;
-            denL = denMediant;
-        } else if (mediant > fractionalPart) {
-            numR = numMediant;
-            denR = denMediant;
-        }
-    }
-    
-    return canRationalize;
 }

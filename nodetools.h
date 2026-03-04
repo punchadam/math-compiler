@@ -112,12 +112,70 @@ const std::optional<double> toDouble(const AST& ast, const NodeID& id) {
     return std::nullopt;
 }
 
-bool containsIdentifier(const AST& ast, const NodeID& id) {
-    
+bool containsIdentifier(const AST& ast, const NodeID& id, const std::string& name) {
+    if (id.isNone()) return false;
+
+    if (auto n = getIdentifierName(ast, id)) return *n == name;
+    if (auto b = getBinaryOp(ast, id)) return containsIdentifier(ast, b->right, name) || containsIdentifier(ast, b->left, name);
+    if (auto u = getUnaryOp(ast, id)) return containsIdentifier(ast, u->inner, name);
+    if (auto c = getCall(ast, id)) {
+        for (const NodeID& arg : c->args) {
+            if (containsIdentifier(ast, arg, name)) return true;
+        }
+    }
+
+    return false;
 }
 
 std::set<std::string> collectIdentifiers(const AST& ast, const NodeID& id) {
+    if (id.isNone()) return {};
 
+    if (auto n = getIdentifierName(ast, id)) return { *n };
+
+    if (auto b = getBinaryOp(ast, id)) {
+        auto left  = collectIdentifiers(ast, b->left);
+        auto right = collectIdentifiers(ast, b->right);
+        left.insert(right.begin(), right.end());
+        return left;
+    }
+    if (auto u = getUnaryOp(ast, id)) return collectIdentifiers(ast, u->inner);
+    if (auto c = getCall(ast, id)) {
+        std::set<std::string> result;
+        for (const NodeID& arg : c->args) {
+            auto argSet = collectIdentifiers(ast, arg);
+            result.insert(argSet.begin(), argSet.end());
+        }
+        return result;
+    }
+    return {};
+}
+
+NodeID cloneSubtree(const AST& in, const NodeID& id, AST& out) {
+    if (id.isNone()) return NodeID::None();
+
+    return std::visit([&](const auto& node) -> NodeID {
+        using T = std::decay_t<decltype(node)>;
+        if constexpr (std::is_same_v<T, ConstantNode>) {
+            return out.addConstant(node.cKind, node.pos);
+        } if constexpr (std::is_same_v<T, RealNode>) {
+            return out.addReal(node.value, node.pos);
+        } if constexpr (std::is_same_v<T, RationalNode>) {
+            return out.addRational(node.numerator, node.denominator, node.pos);
+        } if constexpr (std::is_same_v<T, IdentifierNode>) {
+            return out.addIdentifier(node.name, node.pos);
+        } if constexpr (std::is_same_v<T, BinaryOpNode>) {
+            return out.addBinaryOp(node.bKind, cloneSubtree(in, node.left, out), cloneSubtree(in, node.right, out), node.pos);
+        } if constexpr (std::is_same_v<T, UnaryOpNode>) {
+            return out.addUnaryOp(node.uKind, cloneSubtree(in, node.inner, out), node.pos);
+        } if constexpr (std::is_same_v<T, CallNode>) {
+            std::vector<NodeID> args;
+            args.reserve(node.args.size());
+            for (const NodeID& arg : node.args) {
+                args.push_back(cloneSubtree(in, arg, out));
+            }
+            return out.addCall(node.fKind, args, node.pos);
+        }
+    }, in.at(id).kind);
 }
 
 #endif

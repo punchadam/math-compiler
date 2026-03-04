@@ -46,4 +46,55 @@ enum class SupportedCommands {
     operatorname    // custom ops like max, etc
 };
 
+// stern brocot search for a fraction approx of a double
+bool doubleToRational(const double& input, i64& outNumerator, i64& outDenominator) {
+    // easier for sign stuff
+    double value = input;
+    
+    bool canRationalize = false;
+    bool isNegative = false;
+
+    const double maxError = 1e-12;
+    const u16 maxDenominator = 1000;
+
+    if (value < 0) {
+        isNegative = true;
+        value = -value;
+    }
+
+    i64 wholePart = (i64)value;
+    double fractionalPart = (double)(value - wholePart);
+
+    i64 numL = 0;   i64 numR = 1;
+    i64 denL = 1;   i64 denR = 1;
+
+    while (denL + denR <= maxDenominator) {
+
+        // calculate the mediant as fraction and double
+        i64 numMediant = numL + numR;
+        i64 denMediant = denL + denR;
+        double mediant = (double)numMediant / (double)denMediant;
+
+        // determine if the mediant is close enough to the input
+        if (std::abs(fractionalPart - mediant) <= maxError) {
+            outDenominator = denMediant;
+            outNumerator = numMediant + wholePart * outDenominator;
+            if (isNegative) outNumerator = -outNumerator;
+            canRationalize = true;
+            break;
+        }
+
+        // set bounds based on mediant
+        if (mediant < fractionalPart) {
+            numL = numMediant;
+            denL = denMediant;
+        } else if (mediant > fractionalPart) {
+            numR = numMediant;
+            denR = denMediant;
+        }
+    }
+    
+    return canRationalize;
+}
+
 #endif

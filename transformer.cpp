@@ -6,12 +6,15 @@ NodeID transform(const AST& input, AST& output) {
     current.root = cloneSubtree(input, input.root, current);
 
     while (true) {
-        AST a, b, c, d, next;
+        AST a, b, c, d, e, f, next;
+
         a.root = foldConstants(current, current.root, a);
         b.root = eliminateSubtraction(a, a.root, b);
         c.root = simplifyIdentities(b, b.root, c);
-        d.root = applyTrigIdentities(c, c.root, d);
-        next.root = canonicalizeLogExp(d, d.root, next);
+        d.root = combineLikeTerms(c, c.root, d);
+        e.root = normalizeSign(d, d.root, e);
+        f.root = applyTrigIdentities(e, e.root, f);
+        next.root = canonicalizeLogExp(f, f.root, next);
 
         if (next.arena.size() == current.arena.size()) {
             current = std::move(next);
@@ -492,6 +495,218 @@ NodeID canonicalizeLogExp(const AST& input, const NodeID id, AST& output) {
             return makeQuotient(output, lnX, lnBase);
         }
 
+        return output.addCall(c->fKind, args);
+    }
+
+    return cloneSubtree(input, id, output);
+}
+
+NodeID combineLikeTerms(const AST& input, const NodeID& id, AST& output) {
+    if (id.isNone()) return NodeID::None();
+
+    // leaves — clone directly
+    if (isConstant(input, id) || isReal(input, id) ||
+        isRational(input, id) || isIdentifier(input, id)) {
+        return cloneSubtree(input, id, output);
+    }
+
+    // recurse into binary ops
+    if (auto b = getBinaryOp(input, id)) {
+        NodeID left  = combineLikeTerms(input, b->left, output);
+        NodeID right = combineLikeTerms(input, b->right, output);
+
+        // only flatten Add chains at this level
+        if (b->bKind != BinaryOpKind::Add) {
+            return output.addBinaryOp(b->bKind, left, right);
+        }
+
+        // build a temporary node so we can flatten the *output* tree
+        // (children have already been combined)
+        NodeID tempAdd = output.addBinaryOp(BinaryOpKind::Add, left, right);
+        auto terms = flattenSum(output, tempAdd);
+
+        // Each group: { summed coefficient, remainder NodeID, consumed flag }
+        struct Group {
+            i64 num;     // accumulated numerator
+            i64 den;     // accumulated denominator
+            NodeID remainder;
+        };
+        std::vector<Group> groups;
+
+        for (const NodeID& term : terms) {
+            auto coeff = extractCoefficient(output, term);
+            if (!coeff) {
+                // can't extract coefficient, treat as 1 * term
+                // check if any existing group matches this whole term
+                bool merged = false;
+                for (auto& g : groups) {
+                    if (g.remainder.isNone()) continue;
+                    if (structurallyEqual(output, g.remainder, term)) {
+                        // add 1 to this group
+                        g.num = g.num * 1 + 1 * g.den; // (g.num/g.den) + 1/1
+                        // g.den stays the same
+                        merged = true;
+                        break;
+                    }
+                }
+                if (!merged) {
+                    groups.push_back({1, 1, term});
+                }
+                continue;
+            }
+
+            RationalNode c = coeff->coefficient;
+            NodeID rem = coeff->remainder;
+
+            // find existing group with same remainder
+            bool merged = false;
+            for (auto& g : groups) {
+                // both are pure constants (remainder is None)
+                bool bothPure = g.remainder.isNone() && rem.isNone();
+                bool bothHaveRem = !g.remainder.isNone() && !rem.isNone();
+
+                if (bothPure ||
+                    (bothHaveRem && structurallyEqual(output, g.remainder, rem)))
+                {
+                    // add the coefficients: g.num/g.den + c.num/c.den
+                    g.num = g.num * c.denominator + c.numerator * g.den;
+                    g.den = g.den * c.denominator;
+                    // reduce
+                    i64 gcd = std::gcd(std::abs(g.num), std::abs(g.den));
+                    if (gcd > 0) { g.num /= gcd; g.den /= gcd; }
+                    merged = true;
+                    break;
+                }
+            }
+            if (!merged) {
+                groups.push_back({c.numerator, c.denominator, rem});
+            }
+        }
+
+        // Convert each group back to a node, then fold into an Add chain
+        std::vector<NodeID> rebuilt;
+        for (const auto& g : groups) {
+            if (g.num == 0) continue; // term vanished
+
+            if (g.remainder.isNone()) {
+                // pure rational
+                rebuilt.push_back(output.addRational(g.num, g.den));
+            } else if (g.num == 1 && g.den == 1) {
+                // coefficient is 1 — just the remainder
+                rebuilt.push_back(g.remainder);
+            } else if (g.num == -1 && g.den == 1) {
+                // coefficient is -1 — negate
+                rebuilt.push_back(makeNeg(output, g.remainder));
+            } else {
+                // general case: (num/den) * remainder
+                rebuilt.push_back(makeProduct(
+                    output,
+                    output.addRational(g.num, g.den),
+                    g.remainder
+                ));
+            }
+        }
+
+        if (rebuilt.empty()) {
+            return output.addRational(0, 1);
+        }
+
+        // fold into right-associated Add chain: a + (b + (c + ...))
+        NodeID result = rebuilt.back();
+        for (int i = (int)rebuilt.size() - 2; i >= 0; i--) {
+            result = makeSum(output, rebuilt[i], result);
+        }
+        return result;
+    }
+
+    // recurse into unary ops
+    if (auto u = getUnaryOp(input, id)) {
+        NodeID inner = combineLikeTerms(input, u->inner, output);
+        return output.addUnaryOp(u->uKind, inner);
+    }
+
+    // recurse into calls
+    if (auto c = getCall(input, id)) {
+        std::vector<NodeID> args;
+        args.reserve(c->args.size());
+        for (const NodeID& arg : c->args) {
+            args.emplace_back(combineLikeTerms(input, arg, output));
+        }
+        return output.addCall(c->fKind, args);
+    }
+
+    return cloneSubtree(input, id, output);
+}
+
+NodeID normalizeSign(const AST& input, const NodeID& id, AST& output) {
+    if (id.isNone()) return NodeID::None();
+
+    if (isConstant(input, id) || isReal(input, id) ||
+        isRational(input, id) || isIdentifier(input, id)) {
+        return cloneSubtree(input, id, output);
+    }
+
+    if (auto u = getUnaryOp(input, id)) {
+        if (u->uKind == UnaryOpKind::Negate) {
+            NodeID inner = normalizeSign(input, u->inner, output);
+
+            // -(-(x)) -> x
+            if (auto innerU = getUnaryOp(output, inner)) {
+                if (innerU->uKind == UnaryOpKind::Negate) {
+                    return innerU->inner;
+                }
+            }
+
+            // -(rational) -> fold the sign into the rational
+            if (auto r = getRational(output, inner)) {
+                return output.addRational(-r->numerator, r->denominator);
+            }
+
+            return output.addUnaryOp(u->uKind, inner);
+        }
+
+        NodeID inner = normalizeSign(input, u->inner, output);
+        return output.addUnaryOp(u->uKind, inner);
+    }
+
+    if (auto b = getBinaryOp(input, id)) {
+        NodeID left  = normalizeSign(input, b->left, output);
+        NodeID right = normalizeSign(input, b->right, output);
+
+        if (b->bKind == BinaryOpKind::Multiply || b->bKind == BinaryOpKind::Divide) {
+            // count negations on left and right, strip them,
+            // then re-apply a single negation if odd count
+            int negCount = 0;
+            NodeID l = left, r = right;
+
+            if (auto lu = getUnaryOp(output, l)) {
+                if (lu->uKind == UnaryOpKind::Negate) {
+                    l = lu->inner;
+                    negCount++;
+                }
+            }
+            if (auto ru = getUnaryOp(output, r)) {
+                if (ru->uKind == UnaryOpKind::Negate) {
+                    r = ru->inner;
+                    negCount++;
+                }
+            }
+
+            if (negCount > 0) {
+                NodeID bare = output.addBinaryOp(b->bKind, l, r);
+                return (negCount % 2 == 1) ? makeNeg(output, bare) : bare;
+            }
+        }
+
+        return output.addBinaryOp(b->bKind, left, right);
+    }
+
+    if (auto c = getCall(input, id)) {
+        std::vector<NodeID> args;
+        args.reserve(c->args.size());
+        for (const NodeID& arg : c->args) {
+            args.emplace_back(normalizeSign(input, arg, output));
+        }
         return output.addCall(c->fKind, args);
     }
 

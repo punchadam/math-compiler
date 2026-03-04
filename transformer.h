@@ -73,6 +73,12 @@ NodeID applyTrigIdentities(const AST& input, const NodeID id, AST& output);
 // applies standard log/exp rules plus expansion/change of base stuff to canonicalize to ln
 NodeID canonicalizeLogExp(const AST& input, const NodeID id, AST& output);
 
+// finds and sums coefficients within a group of like terms
+NodeID combineLikeTerms(const AST& input, const NodeID& id, AST& output);
+
+// convert "-(-x)" into "x"
+NodeID normalizeSign(const AST& input, const NodeID& id, AST& output);
+
 // returns exact rational if possible
 std::optional<NodeID> tryFoldPower(const RationalNode& base, const RationalNode& exp, AST& output);
 // returns exact nth root of val if possible

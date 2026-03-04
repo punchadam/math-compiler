@@ -362,4 +362,76 @@ inline std::optional<RationalNode> extractECoefficient(const AST& ast, const Nod
 
 #pragma endregion COEFFICIENT_EXTRACTION
 
+// compares 2 subtrees for structural identity, for like-term grouping
+inline bool structurallyEqual(const AST& a, const NodeID& idA, const AST& b, const NodeID& idB) {
+    if (idA.isNone() && idB.isNone()) return true;
+    if (idA.isNone() || idB.isNone()) return false;
+
+    const ASTNode::Kind& kindA = a.at(idA).kind;
+    const ASTNode::Kind& kindB = b.at(idB).kind;
+
+    if (kindA.index() != kindB.index()) return false;
+
+    return std::visit([&](const auto& nodeA) -> bool {
+        using T = std::decay_t<decltype(nodeA)>;
+
+        const T& nodeB = std::get<T>(kindB);
+
+        if constexpr (std::is_same_v<T, ConstantNode>) {
+            return nodeA.cKind == nodeB.cKind;
+        }
+        if constexpr (std::is_same_v<T, RealNode>) {
+            return nodeA.value == nodeB.value;
+        }
+        if constexpr (std::is_same_v<T, RationalNode>) {
+            return nodeA.numerator == nodeB.numerator && nodeA.denominator == nodeB.denominator;
+        }
+        if constexpr (std::is_same_v<T, IdentifierNode>) {
+            return nodeA.name == nodeB.name;
+        }
+
+        if constexpr (std::is_same_v<T, BinaryOpNode>) {
+            return nodeA.bKind == nodeB.bKind && structurallyEqual(a, nodeA.left, b, nodeB.left) && structurallyEqual(a, nodeA.right, b, nodeB.right);
+        }
+        if constexpr (std::is_same_v<T, UnaryOpNode>) {
+            return nodeA.uKind == nodeB.uKind && structurallyEqual(a, nodeA.inner, b, nodeB.inner);
+        }
+        if constexpr (std::is_same_v<T, CallNode>) {
+            if (nodeA.fKind != nodeB.fKind) return false;
+            if (nodeA.args.size() != nodeB.args.size()) return false;
+            for (size_t i = 0; i < nodeA.args.size(); i++) {
+                if (!structurallyEqual(a, nodeA.args[i], b, nodeB.args[i])) return false;
+            }
+            return true;
+        }
+
+        return false;
+    }, kindA);
+}
+
+inline bool structurallyEqual(const AST& ast, const NodeID& idA, const NodeID& idB) {
+    return structurallyEqual(ast, idA, ast, idB);
+}
+
+// walks a chain of add nodes and turns all coefficients into a flat vector of terms
+inline void flattenSum(const AST& ast, const NodeID& id, std::vector<NodeID>& terms) {
+    if (id.isNone()) return;
+
+    if (auto b = getBinaryOp(ast, id)) {
+        if (b->bKind == BinaryOpKind::Add) {
+            flattenSum(ast, b->left, terms);
+            flattenSum(ast, b->right, terms);
+            return;
+        }
+    }
+
+    terms.push_back(id);
+}
+
+inline std::vector<NodeID> flattenSum(const AST& ast, const NodeID& id) {
+    std::vector<NodeID> terms;
+    flattenSum(ast, id, terms);
+    return terms;
+}
+
 #endif

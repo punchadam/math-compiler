@@ -4,6 +4,7 @@
 #include "ast.h"
 #include "Error.h"
 #include <set>
+#include <algorithm>
 
 #pragma region IS_TYPE_METHODS
 inline bool isConstant(const AST& ast, const NodeID& id) {
@@ -422,5 +423,80 @@ inline std::vector<NodeID> flattenSum(const AST& ast, const NodeID& id) {
     flattenSum(ast, id, terms);
     return terms;
 }
+
+#pragma region ORDERING
+// rank for top-level node type, used for canonical ordering
+inline i8 nodeTypeRank(const AST& ast, const NodeID& id) {
+    if (id.isNone()) return -1;
+    return std::visit([](const auto& node) -> u8 {
+        using T = std::decay_t<decltype(node)>;
+        if constexpr (std::is_same_v<T, RationalNode>) return 0;
+        if constexpr (std::is_same_v<T, RealNode>) return 1;
+        if constexpr (std::is_same_v<T, ConstantNode>) return 2;
+        if constexpr (std::is_same_v<T, IdentifierNode>) return 3;
+        if constexpr (std::is_same_v<T, UnaryOpNode>) return 4;
+        if constexpr (std::is_same_v<T, CallNode>) return 5;
+        if constexpr (std::is_same_v<T, BinaryOpNode>) return 6;
+        return 7;
+    }, ast.at(id).kind);
+}
+
+inline i8 compareNodes(const AST& ast, const NodeID& a, const NodeID& b) {
+    if (a.isNone() && b.isNone()) return 0;
+    if (a.isNone()) return -1;
+    if (b.isNone()) return 1;
+
+    i8 rankA = nodeTypeRank(ast, a);
+    i8 rankB = nodeTypeRank(ast, b);
+    if (rankA != rankB) return rankA - rankB;
+
+    return std::visit([&](const auto& nodeA) -> i8 {
+        using T = std::decay_t<decltype(nodeA)>;
+        const T& nodeB = std::get<T>(ast.at(b).kind);
+
+        if constexpr (std::is_same_v<T, RationalNode>) {
+            double aVal = (double)nodeA.numerator / (double)nodeA.denominator;
+            double bVal = (double)nodeB.numerator / (double)nodeB.denominator;
+
+            if (aVal < bVal) return -1;
+            if (aVal > bVal) return 1;
+            return 0;
+        }
+        if constexpr (std::is_same_v<T, RealNode>) {
+            if (nodeA.value < nodeB.value) return -1;
+            if (nodeA.value > nodeB.value) return 1;
+            return 0;
+        }
+        if constexpr (std::is_same_v<T, ConstantNode>) {
+            return static_cast<i8>(nodeA.cKind) - static_cast<i8>(nodeB.cKind);
+        }
+        if constexpr (std::is_same_v<T, CallNode>) {
+            i8 k = static_cast<i8>(nodeA.fKind) - static_cast<i8>(nodeB.fKind);
+            if (k != 0) return k;
+            size_t minArgs = std::min(nodeA.args.size(), nodeB.args.size());
+            for (size_t i = 0; i < minArgs; i++) {
+                i8 c = compareNodes(ast, nodeA.args[i], nodeB.args[i]);
+                if (c != 0) return c;
+            }
+            if (nodeA.args.size() < nodeB.args.size()) return -1;
+            if (nodeA.args.size() > nodeB.args.size()) return 1;
+            return 0; 
+        }
+        if constexpr (std::is_same_v<T, BinaryOpNode>) {
+            i8 k = static_cast<i8>(nodeA.bKind) - static_cast<i8>(nodeB.bKind);
+            if (k != 0) return k;
+            i8 compareLeft = compareNodes(ast, nodeA.left, nodeB.left);
+            if (compareLeft != 0) return compareLeft;
+            return compareNodes(ast, nodeA.right, nodeB.right);
+        }
+        return 0;
+    }, ast.at(a).kind);
+}
+
+inline bool nodeLessThan(const AST& ast, const NodeID& a, const NodeID& b) {
+    return compareNodes(ast, a, b) < 0;
+}
+
+#pragma endregion ORDERING
 
 #endif

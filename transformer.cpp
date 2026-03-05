@@ -1,5 +1,7 @@
 #include "transformer.h"
 #include <cmath>
+#include <cassert>
+#include <iostream>
 
 NodeID transform(const AST& input, AST& output) {
     AST current;
@@ -520,12 +522,14 @@ NodeID combineLikeTerms(const AST& input, const NodeID& id, AST& output) {
             return output.addBinaryOp(b->bKind, left, right);
         }
 
-        // build a temporary node so we can flatten the *output* tree
-        // (children have already been combined)
-        NodeID tempAdd = output.addBinaryOp(BinaryOpKind::Add, left, right);
-        auto terms = flattenSum(output, tempAdd);
+        // build temp AST to avoid corrupting output
+        AST temp;
+        NodeID tempLeft = cloneSubtree(output, left, temp);
+        NodeID tempRight = cloneSubtree(output, right, temp);
+        NodeID tempAdd = temp.addBinaryOp(BinaryOpKind::Add, tempLeft, tempRight);
+        auto terms = flattenSum(temp, tempAdd);
 
-        // Each group: { summed coefficient, remainder NodeID, consumed flag }
+        // each group is a summed coefficient, remainder NodeID
         struct Group {
             i64 num;     // accumulated numerator
             i64 den;     // accumulated denominator
@@ -533,106 +537,127 @@ NodeID combineLikeTerms(const AST& input, const NodeID& id, AST& output) {
         };
         std::vector<Group> groups;
 
-        for (const NodeID& term : terms) {
-            auto coeff = extractCoefficient(output, term);
-            if (!coeff) {
-                // can't extract coefficient, treat as 1 * term
-                // check if any existing group matches this whole term
+        try {
+            for (const NodeID& term : terms) {
+                assert(term.i < temp.arena.size() && "term not in temp!");
+                auto coeff = extractCoefficient(temp, term);
+                if (!coeff) {
+                    // can't extract coefficient, treat as 1 * term
+                    // check if any existing group matches this whole term
+                    bool merged = false;
+                    for (auto& g : groups) {
+                        if (g.remainder.isNone()) continue;
+                        if (structurallyEqual(temp, g.remainder, term)) {
+                            // add 1 to this group
+                            g.num = g.num * 1 + 1 * g.den; // (g.num/g.den) + 1/1
+                            // g.den stays the same
+                            merged = true;
+                            break;
+                        }
+                    }
+                    if (!merged) {
+                        groups.push_back({1, 1, term});
+                    }
+                    continue;
+                }
+
+                RationalNode c = coeff->coefficient;
+                NodeID rem = coeff->remainder;
+
+                // find existing group with same remainder
                 bool merged = false;
                 for (auto& g : groups) {
-                    if (g.remainder.isNone()) continue;
-                    if (structurallyEqual(output, g.remainder, term)) {
-                        // add 1 to this group
-                        g.num = g.num * 1 + 1 * g.den; // (g.num/g.den) + 1/1
-                        // g.den stays the same
+                    bool bothPure = g.remainder.isNone() && rem.isNone();
+                    bool bothHaveRemainder = !g.remainder.isNone() && !rem.isNone();
+
+                    if (bothPure || (bothHaveRemainder && structurallyEqual(temp, g.remainder, rem)))
+                    {
+                        // add the coefficients: g.num/g.den + c.num/c.den
+                        g.num = g.num * c.denominator + c.numerator * g.den;
+                        g.den = g.den * c.denominator;
+                        // reduce
+                        i64 gcd = std::gcd(std::abs(g.num), std::abs(g.den));
+                        if (gcd > 0) { g.num /= gcd; g.den /= gcd; }
                         merged = true;
                         break;
                     }
                 }
                 if (!merged) {
-                    groups.push_back({1, 1, term});
-                }
-                continue;
-            }
-
-            RationalNode c = coeff->coefficient;
-            NodeID rem = coeff->remainder;
-
-            // find existing group with same remainder
-            bool merged = false;
-            for (auto& g : groups) {
-                // both are pure constants (remainder is None)
-                bool bothPure = g.remainder.isNone() && rem.isNone();
-                bool bothHaveRem = !g.remainder.isNone() && !rem.isNone();
-
-                if (bothPure ||
-                    (bothHaveRem && structurallyEqual(output, g.remainder, rem)))
-                {
-                    // add the coefficients: g.num/g.den + c.num/c.den
-                    g.num = g.num * c.denominator + c.numerator * g.den;
-                    g.den = g.den * c.denominator;
-                    // reduce
-                    i64 gcd = std::gcd(std::abs(g.num), std::abs(g.den));
-                    if (gcd > 0) { g.num /= gcd; g.den /= gcd; }
-                    merged = true;
-                    break;
+                    groups.push_back({c.numerator, c.denominator, rem});
                 }
             }
-            if (!merged) {
-                groups.push_back({c.numerator, c.denominator, rem});
-            }
+        } catch (std::exception& e) {
+            std::string msg = "\nError in combineLikeTerms first loop. Output:\n";
+            msg += e.what();
+            throw TransformerError(UnknownPos, msg);
         }
 
-        // Convert each group back to a node, then fold into an Add chain
+        // convert each group back to a node, then fold into an Add chain
         std::vector<NodeID> rebuilt;
-        for (const auto& g : groups) {
-            if (g.num == 0) continue; // term vanished
+        try {
+            for (const auto& g : groups) {
+                if (g.num == 0) continue;
 
-            if (g.remainder.isNone()) {
-                // pure rational
-                rebuilt.push_back(output.addRational(g.num, g.den));
-            } else if (g.num == 1 && g.den == 1) {
-                // coefficient is 1 — just the remainder
-                rebuilt.push_back(g.remainder);
-            } else if (g.num == -1 && g.den == 1) {
-                // coefficient is -1 — negate
-                rebuilt.push_back(makeNeg(output, g.remainder));
-            } else {
-                // general case: (num/den) * remainder
-                rebuilt.push_back(makeProduct(
-                    output,
-                    output.addRational(g.num, g.den),
-                    g.remainder
-                ));
+                if (g.remainder.isNone()) {
+                    rebuilt.push_back(output.addRational(g.num, g.den));
+                } else if (g.num == 1 && g.den == 1) {
+                    rebuilt.push_back(cloneSubtree(temp, g.remainder, output));
+                } else if (g.num == -1 && g.den == 1) {
+                    rebuilt.push_back(makeNeg(output, cloneSubtree(temp, g.remainder, output)));
+                } else {
+                    rebuilt.push_back(makeProduct(output, output.addRational(g.num, g.den), cloneSubtree(temp, g.remainder, output)));
+                }
             }
+        } catch (std::exception& e) {
+            std::string msg = "\nError in combineLikeTerms second loop. Output:\n";
+            msg += e.what();
+            throw TransformerError(UnknownPos, msg);
         }
 
         if (rebuilt.empty()) {
             return output.addRational(0, 1);
         }
 
-        // fold into right-associated Add chain: a + (b + (c + ...))
-        NodeID result = rebuilt.back();
-        for (int i = (int)rebuilt.size() - 2; i >= 0; i--) {
-            result = makeSum(output, rebuilt[i], result);
+        try {
+            // fold into a right-leaning add chain
+            NodeID result = rebuilt.back();
+            for (int i = (int)rebuilt.size() - 2; i >= 0; i--) {
+                result = makeSum(output, rebuilt[i], result);
+            }
+            return result;
+        } catch (std::exception& e) {
+            std::string msg = "\nError in combineLikeTerms third loop. Output:\n";
+            msg += e.what();
+            throw TransformerError(UnknownPos, msg);
         }
-        return result;
     }
 
-    // recurse into unary ops
-    if (auto u = getUnaryOp(input, id)) {
-        NodeID inner = combineLikeTerms(input, u->inner, output);
-        return output.addUnaryOp(u->uKind, inner);
-    }
-
-    // recurse into calls
-    if (auto c = getCall(input, id)) {
-        std::vector<NodeID> args;
-        args.reserve(c->args.size());
-        for (const NodeID& arg : c->args) {
-            args.emplace_back(combineLikeTerms(input, arg, output));
+    try {
+        // recurse into unary ops
+        if (auto u = getUnaryOp(input, id)) {
+            NodeID inner = combineLikeTerms(input, u->inner, output);
+            return output.addUnaryOp(u->uKind, inner);
         }
-        return output.addCall(c->fKind, args);
+    } catch (std::exception& e) {
+        std::string msg = "\nError in combineLikeTerms unary recursion. Output:\n";
+        msg += e.what();
+        throw TransformerError(UnknownPos, msg);
+    }
+    
+    try {
+        // recurse into calls
+        if (auto c = getCall(input, id)) {
+            std::vector<NodeID> args;
+            args.reserve(c->args.size());
+            for (const NodeID& arg : c->args) {
+                args.emplace_back(combineLikeTerms(input, arg, output));
+            }
+            return output.addCall(c->fKind, args);
+        }
+    } catch (std::exception& e) {
+        std::string msg = "\nError in combineLikeTerms call recursion. Output:\n";
+        msg += e.what();
+        throw TransformerError(UnknownPos, msg);
     }
 
     return cloneSubtree(input, id, output);

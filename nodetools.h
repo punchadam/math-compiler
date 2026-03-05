@@ -428,7 +428,7 @@ inline std::vector<NodeID> flattenSum(const AST& ast, const NodeID& id) {
     return terms;
 }
 
-inline std::vector<NodeID> flattenProduct(const AST& ast, const NodeID& id, std::vector<NodeID> factors) {
+inline void flattenProduct(const AST& ast, const NodeID& id, std::vector<NodeID> factors) {
     if (id.isNone()) return;
 
     if (auto b = getBinaryOp(ast, id)) {
@@ -439,6 +439,12 @@ inline std::vector<NodeID> flattenProduct(const AST& ast, const NodeID& id, std:
         }
     }
     factors.push_back(id);
+}
+
+inline std::vector<NodeID> flattenProduct(const AST& ast, const NodeID& id) {
+    std::vector<NodeID> factors;
+    flattenProduct(ast, id, factors);
+    return factors;
 }
 
 #pragma region ORDERING

@@ -32,15 +32,15 @@ inline bool isNumeric(const AST& ast, const NodeID& id) {
     return isReal(ast, id) || isRational(ast, id);
 }
 
-inline bool isLeafNode(const AST& ast, const NodeID& id) {
-    return isNumeric(ast, id) || isConstant(ast, id) || isIdentifier(ast, id);
-}
-
 inline bool isIdentifier(const AST& ast, const NodeID& id) {
     if (id.isNone()) return false;
     const ASTNode::Kind& k = ast.at(id).kind;
     if (std::holds_alternative<IdentifierNode>(k)) return true;
     return false;
+}
+
+inline bool isLeafNode(const AST& ast, const NodeID& id) {
+    return isNumeric(ast, id) || isConstant(ast, id) || isIdentifier(ast, id);
 }
 
 inline bool isBinaryOp(const AST& ast, const NodeID& id) {
@@ -428,7 +428,7 @@ inline std::vector<NodeID> flattenSum(const AST& ast, const NodeID& id) {
     return terms;
 }
 
-inline void flattenProduct(const AST& ast, const NodeID& id, std::vector<NodeID> factors) {
+inline void flattenProduct(const AST& ast, const NodeID& id, std::vector<NodeID>& factors) {
     if (id.isNone()) return;
 
     if (auto b = getBinaryOp(ast, id)) {

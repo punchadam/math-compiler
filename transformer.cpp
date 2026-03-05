@@ -405,7 +405,7 @@ NodeID combineLikeTerms(const AST& input, const NodeID& id, AST& output) {
 
         // fold into a right-leaning add chain
         NodeID result = rebuilt.back();
-        for (int i = (int)rebuilt.size() - 2; i >= 0; i--) {    // iterate backwards to preserve add order
+        for (i16 i = (i16)rebuilt.size() - 2; i >= 0; i--) {    // iterate backwards to preserve add order
             result = makeSum(output, rebuilt[i], result);
         }
         return result;
@@ -682,10 +682,11 @@ NodeID canonicalOrder(const AST& input, const NodeID& id, AST& output) {
             if (b->bKind == BinaryOpKind::Add) {
                 AST temp;
                 NodeID tempLeft = cloneSubtree(output, left, temp);
-                NodeID tempRight = cloneSubtree(output, left, temp);
+                NodeID tempRight = cloneSubtree(output, right, temp);
                 NodeID tempAdd = temp.addBinaryOp(BinaryOpKind::Add, tempLeft, tempRight);
 
                 std::vector terms = flattenSum(temp, tempAdd);
+                if (terms.empty()) return output.addBinaryOp(b->bKind, left, right);
 
                 std::sort(terms.begin(), terms.end(),
                     [&](const NodeID& a, const NodeID& b) {
@@ -694,7 +695,7 @@ NodeID canonicalOrder(const AST& input, const NodeID& id, AST& output) {
 
                 // rebuild as right-leaning chain
                 NodeID result = cloneSubtree(temp, terms.back(), output);
-                for (size_t i = terms.size() - 2; i >= 0; i--) {    // iterate backwards to preserve order
+                for (i16 i = (i16)terms.size() - 2; i >= 0; i--) {    // iterate backwards to preserve order
                     result = makeSum(output, cloneSubtree(temp, terms[i], output), result);
                 }
                 return result;
@@ -702,14 +703,13 @@ NodeID canonicalOrder(const AST& input, const NodeID& id, AST& output) {
 
             if (b->bKind == BinaryOpKind::Multiply) {
                 AST temp;
-                
-                AST temp;
+
                 NodeID tempLeft = cloneSubtree(output, left, temp);
-                NodeID tempRight = cloneSubtree(output, left, temp);
+                NodeID tempRight = cloneSubtree(output, right, temp);
                 NodeID tempMultiply = temp.addBinaryOp(BinaryOpKind::Multiply, tempLeft, tempRight);
 
-                std::vector<NodeID> factors;
-                flattenProduct(temp, tempMultiply, factors);
+                std::vector<NodeID> factors = flattenProduct(temp, tempMultiply);
+                if (factors.empty()) return output.addBinaryOp(b->bKind, left, right);
 
                 std::sort(factors.begin(), factors.end(),
                     [&](const NodeID& a, const NodeID& b) {
@@ -717,7 +717,7 @@ NodeID canonicalOrder(const AST& input, const NodeID& id, AST& output) {
                 });
 
                 NodeID result = cloneSubtree(temp, factors.back(), output);
-                for (size_t i = factors.size() - 2; i >= 0; i--) {  // iterate backwards to preserve order
+                for (i16 i = (i16)factors.size() - 2; i >= 0; i--) {    // iterate backwards to preserve order
                     result = makeProduct(output, cloneSubtree(temp, factors[i], output), result);
                 }
                 return result;

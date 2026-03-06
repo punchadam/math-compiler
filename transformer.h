@@ -67,20 +67,23 @@ NodeID foldConstants(const AST& input, const NodeID& id, AST& output);
 // turns all subtraction into addition of negation 
 NodeID eliminateSubtraction(const AST& input, const NodeID& id, AST& output);
 
+// turns all division into multiplication by reciprocal
+NodeID eliminateDivision(const AST& input, const NodeID& id, AST& output);
+
 // simplifies stuff like x * 0, x + 0, x * 1, etc
 NodeID simplifyIdentities(const AST& input, const NodeID & id, AST& output);
+
+// finds and sums coefficients within a group of like terms
+NodeID combineLikeTerms(const AST& input, const NodeID& id, AST& output);
+
+// collects exponents of the same base and adds them
+NodeID collectExponents(const AST& input, const NodeID& id, AST& output);
 
 // folds trig functions at known multiples of pi into exact values
 NodeID applyTrigIdentities(const AST& input, const NodeID id, AST& output);
 
 // applies standard log/exp rules plus expansion/change of base stuff to canonicalize to ln
 NodeID canonicalizeLogExp(const AST& input, const NodeID id, AST& output);
-
-// finds and sums coefficients within a group of like terms
-NodeID combineLikeTerms(const AST& input, const NodeID& id, AST& output);
-
-// convert "-(-x)" into "x"
-NodeID normalizeSign(const AST& input, const NodeID& id, AST& output);
 
 // order terms canonically
 NodeID canonicalOrder(const AST& input, const NodeID& id, AST& output);

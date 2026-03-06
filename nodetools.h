@@ -209,10 +209,6 @@ inline NodeID makeNeg(AST& ast, const NodeID& inner) {
     return ast.addBinaryOp(BinaryOpKind::Multiply, ast.addRational(-1, 1), inner);
 }
 
-inline NodeID makeReciprocal(AST& ast, const NodeID& inner) {
-    return ast.addBinaryOp(BinaryOpKind::Divide, ast.addRational(1, 1), inner);
-}
-
 inline NodeID makePiMultiple(AST& ast, i64 num, i64 den) {
     if (num == 0) return ast.addRational(0, 1);
     NodeID pi = ast.addConstant(ConstantKind::PI);
@@ -228,12 +224,16 @@ inline NodeID makeSum(AST& ast, const NodeID& a, const NodeID& b) {
     return ast.addBinaryOp(BinaryOpKind::Add, a, b);
 }
 
-inline NodeID makeQuotient(AST& ast, const NodeID& a, const NodeID& b) {
-    return ast.addBinaryOp(BinaryOpKind::Divide, a, b);
-}
-
 inline NodeID makePower(AST& ast, const NodeID& base, const NodeID& exp) {
     return ast.addBinaryOp(BinaryOpKind::Power, base, exp);
+}
+
+inline NodeID makeReciprocal(AST& ast, const NodeID& inner) {
+    return makePower(ast, inner, ast.addRational(-1, 1));
+}
+
+inline NodeID makeQuotient(AST& ast, const NodeID& a, const NodeID& b) {
+    return makeProduct(ast, a, makeReciprocal(ast, b));
 }
 
 inline NodeID cloneSubtree(const AST& in, const NodeID& id, AST& out) {
@@ -265,8 +265,7 @@ inline NodeID cloneSubtree(const AST& in, const NodeID& id, AST& out) {
 }
 #pragma endregion BUILDERS
 
-#pragma region COEFFICIENT_EXTRACTION
-
+#pragma region COEFFICIENT_EXPONENT_EXTRACTION
 struct CoefficientPair {
     RationalNode coefficient;
     NodeID remainder; // None if the expression is purely rational
@@ -352,6 +351,28 @@ inline std::optional<RationalNode> extractPiCoefficient(const AST& ast, const No
 
 inline std::optional<RationalNode> extractECoefficient(const AST& ast, const NodeID& id) {
     return extractConstantCoefficient(ast, id, ConstantKind::E);
+}
+
+struct ExponentPair {
+    NodeID base;
+    RationalNode exponent;
+};
+
+inline std::optional<ExponentPair> extractExponent(const AST& ast, const NodeID& id) {
+    if (id.isNone()) return std::nullopt;
+
+    // x ^ (p/q)
+    if (auto b = getBinaryOp(ast, id)) {
+        if (b->bKind == BinaryOpKind::Power && isRational(ast, b->right)) {
+            return ExponentPair {b->left, *getRational(ast, b->right)};
+        }
+    }
+    
+    if (!isRational(ast, id) && !isReal(ast, id)) {
+        return ExponentPair { id, {1, 1} };
+    }
+    
+    return std::nullopt;
 }
 
 #pragma endregion COEFFICIENT_EXTRACTION

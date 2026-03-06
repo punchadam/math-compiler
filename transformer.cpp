@@ -7,9 +7,9 @@ NodeID transform(const AST& input, AST& output) {
     AST current;
     current.root = cloneSubtree(input, input.root, current);
 
-    for (size_t i = 0; i < 64; i++) {
+    for (size_t iterations = 0; iterations < 64; iterations++) {
         u8 pass = 0;
-        AST a, b, c, d, e, f, g, h, next;
+        AST a, b, c, d, e, f, g, h, i, next;
         try {
             ++pass;
             a.root = eliminateNegate(current, current.root, a);
@@ -18,28 +18,34 @@ NodeID transform(const AST& input, AST& output) {
             ++pass;
             c.root = eliminateSubtraction(b, b.root, c);
             ++pass;
-            d.root = simplifyIdentities(c, c.root, d);
+            d.root = eliminateDivision(c, c.root, d);
             ++pass;
-            e.root = combineLikeTerms(d, d.root, e);
+            e.root = simplifyIdentities(d, d.root, e);
             ++pass;
-            f.root = applyTrigIdentities(e, e.root, f);
+            f.root = combineLikeTerms(e, e.root, f);
             ++pass;
-            g.root = canonicalizeLogExp(f, f.root, g);
+            g.root = collectExponents(f, f.root, g);
             ++pass;
-            next.root = canonicalOrder(g, g.root, next);
+            h.root = applyTrigIdentities(g, g.root, h);
+            ++pass;
+            i.root = canonicalizeLogExp(h, h.root, i);
+            ++pass;
+            next.root = canonicalOrder(i, i.root, next);
         } catch(const std::exception& e) {
             std::string msg = "In pass: ";
             switch (pass) {
-                case 0: msg = "In initialization"; break;
-                case 1: msg += "eliminateNegate"; break;
-                case 2: msg += "foldConstants"; break;
-                case 3: msg += "eliminateSubtraction"; break;
-                case 4: msg += "simplifyIdentities"; break;
-                case 5: msg += "combineLikeTerms"; break;
-                case 6: msg += "applyTrigIdentities"; break;
-                case 7: msg += "canonicalizeLogExp"; break;
-                case 8: msg += "canonicalOrder"; break;
-                default: msg = "Idk man you fucked up tho";
+                case 0: msg = "In initialization\n"; break;
+                case 1: msg += "eliminateNegate\n"; break;
+                case 2: msg += "foldConstants\n"; break;
+                case 3: msg += "eliminateSubtraction\n"; break;
+                case 4: msg += "eliminateDivision\n"; break;
+                case 5: msg += "simplifyIdentities\n"; break;
+                case 6: msg += "combineLikeTerms\n"; break;
+                case 7: msg += "collectExponent\n"; break;
+                case 8: msg += "applyTrigIdentities\n"; break;
+                case 9: msg += "canonicalizeLogExp\n"; break;
+                case 10: msg += "canonicalOrder\n"; break;
+                default: msg = "Idk man you fucked up tho\n";
             }
             throw TransformerError(UnknownPos, msg);
         }
@@ -50,7 +56,7 @@ NodeID transform(const AST& input, AST& output) {
         }
 
         current = std::move(next);
-        if (i == 63) throw TransformerError(UnknownPos, "Transform did not converge");
+        if (iterations == 63) throw TransformerError(UnknownPos, "Transform did not converge");
     }
 
     output.root = cloneSubtree(current, current.root, output);
@@ -240,6 +246,44 @@ NodeID eliminateSubtraction(const AST& input, const NodeID& id, AST& output) {
     return cloneSubtree(input, id, output);
 }
 
+NodeID eliminateDivision(const AST& input, const NodeID& id, AST& output) {
+    if (id.isNone()) return NodeID::None();
+
+    if (isLeafNode(input, id)) return cloneSubtree(input, id, output);
+
+    if (auto b = getBinaryOp(input, id)) {
+        NodeID left = eliminateDivision(input, b->left, output);
+        NodeID right = eliminateDivision(input, b->right, output);
+
+        if (b->bKind == BinaryOpKind::Divide) {
+            // don't decompose rational/rational
+            if (isRational(output, left) && isRational(output, right)) {
+                return output.addBinaryOp(BinaryOpKind::Divide, left, right);
+            }
+
+            // a / b -> a * b^(-1)
+            return makeProduct(output, left, makeReciprocal(output, right));
+        }
+        return output.addBinaryOp(b->bKind, left, right);
+    }
+
+    if (auto u = getUnaryOp(input, id)) {
+        NodeID inner = eliminateDivision(input, u->inner, output);
+        return output.addUnaryOp(u->uKind, inner);
+    }
+
+    if (auto c = getCall(input, id)) {
+        std::vector<NodeID> args;
+        args.reserve(c->args.size());
+        for (const NodeID& arg : c->args) {
+            args.emplace_back(eliminateDivision(input, arg, output));
+        }
+        return output.addCall(c->fKind, args);
+    }
+
+    return cloneSubtree(input, id, output);
+}
+
 NodeID simplifyIdentities(const AST& input, const NodeID & id, AST& output) {
     if (id.isNone()) return NodeID::None();
 
@@ -263,6 +307,7 @@ NodeID simplifyIdentities(const AST& input, const NodeID & id, AST& output) {
                 if (isNegativeOne(output, right)) return makeNeg(output, left);
                 break;
             }
+            /*
             case BinaryOpKind::Divide: {
                 if (isZero(output, left)) return output.addRational(0, 1);
                 if (isOne(output, right)) return left;
@@ -275,6 +320,7 @@ NodeID simplifyIdentities(const AST& input, const NodeID & id, AST& output) {
                 }
                 break;
             }
+            */
             case BinaryOpKind::Power: {
                 if (isZero(output, right)) return output.addRational(1, 1);
                 if (isOne(output, right)) return left;
@@ -362,18 +408,18 @@ NodeID combineLikeTerms(const AST& input, const NodeID& id, AST& output) {
 
             // find existing group with same remainder
             bool merged = false;
-            for (auto& g : groups) {
-                bool bothPure = g.remainder.isNone() && rem.isNone();
-                bool bothHaveRemainder = !g.remainder.isNone() && !rem.isNone();
+            for (auto& group : groups) {
+                bool bothPure = group.remainder.isNone() && rem.isNone();
+                bool bothHaveRemainder = !group.remainder.isNone() && !rem.isNone();
 
-                if (bothPure || (bothHaveRemainder && structurallyEqual(temp, g.remainder, rem)))
+                if (bothPure || (bothHaveRemainder && structurallyEqual(temp, group.remainder, rem)))
                 {
-                    // add the coefficients: g.num/g.den + c.num/c.den
-                    g.num = g.num * c.denominator + c.numerator * g.den;
-                    g.den = g.den * c.denominator;
+                    // add the coefficients: group.num/group.den + c.num/c.den
+                    group.num = group.num * c.denominator + c.numerator * group.den;
+                    group.den = group.den * c.denominator;
                     // reduce
-                    i64 gcd = std::gcd(std::abs(g.num), std::abs(g.den));
-                    if (gcd > 0) { g.num /= gcd; g.den /= gcd; }
+                    i64 gcd = std::gcd(std::abs(group.num), std::abs(group.den));
+                    if (gcd > 0) { group.num /= gcd; group.den /= gcd; }
                     merged = true;
                     break;
                 }
@@ -385,17 +431,17 @@ NodeID combineLikeTerms(const AST& input, const NodeID& id, AST& output) {
 
         // convert each group back to a node, then fold into an Add chain
         std::vector<NodeID> rebuilt;
-        for (const auto& g : groups) {
-            if (g.num == 0) continue;
+        for (const auto& group : groups) {
+            if (group.num == 0) continue;
 
-            if (g.remainder.isNone()) {
-                rebuilt.push_back(output.addRational(g.num, g.den));
-            } else if (g.num == 1 && g.den == 1) {
-                rebuilt.push_back(cloneSubtree(temp, g.remainder, output));
-            } else if (g.num == -1 && g.den == 1) {
-                rebuilt.push_back(makeNeg(output, cloneSubtree(temp, g.remainder, output)));
+            if (group.remainder.isNone()) {
+                rebuilt.push_back(output.addRational(group.num, group.den));
+            } else if (group.num == 1 && group.den == 1) {
+                rebuilt.push_back(cloneSubtree(temp, group.remainder, output));
+            } else if (group.num == -1 && group.den == 1) {
+                rebuilt.push_back(makeNeg(output, cloneSubtree(temp, group.remainder, output)));
             } else {
-                rebuilt.push_back(makeProduct(output, output.addRational(g.num, g.den), cloneSubtree(temp, g.remainder, output)));
+                rebuilt.push_back(makeProduct(output, output.addRational(group.num, group.den), cloneSubtree(temp, group.remainder, output)));
             }
         }
 
@@ -427,6 +473,119 @@ NodeID combineLikeTerms(const AST& input, const NodeID& id, AST& output) {
         return output.addCall(c->fKind, args);
     }
 
+    return cloneSubtree(input, id, output);
+}
+
+NodeID collectExponents(const AST& input, const NodeID& id, AST& output) {
+    if (id.isNone()) return NodeID::None();
+
+    if (isLeafNode(input, id)) return cloneSubtree(input, id, output);
+
+    // recurse into binary ops
+    if (auto b = getBinaryOp(input, id)) {
+        NodeID left  = combineLikeTerms(input, b->left, output);
+        NodeID right = combineLikeTerms(input, b->right, output);
+
+        if (b->bKind != BinaryOpKind::Multiply) {
+            return output.addBinaryOp(b->bKind, left, right);
+        }
+
+        // build temp AST to avoid corrupting output
+        AST temp;
+        NodeID tempLeft = cloneSubtree(output, left, temp);
+        NodeID tempRight = cloneSubtree(output, right, temp);
+        NodeID tempMultiply = temp.addBinaryOp(BinaryOpKind::Multiply, tempLeft, tempRight);
+        auto factors = flattenProduct(temp, tempMultiply);
+
+        // each group is a base with rational exponent
+        struct Group {
+            i64 num;     // exponent numerator
+            i64 den;     // exponent denominator
+            NodeID base;
+        };
+        std::vector<Group> groups;
+
+        // separate out the numeric coefficient (keep rationals as-is)
+        std::optional<RationalNode> numericCoefficient;
+
+        for (const NodeID& factor : factors) {
+            
+            // accumulate rational factors separately
+            if (isRational(temp, factor)) {
+                auto r = *getRational(temp, factor);
+                if (!numericCoefficient) {
+                    numericCoefficient = r;
+                } else {
+                    numericCoefficient = RationalNode {
+                        numericCoefficient->numerator * r.numerator,
+                        numericCoefficient->denominator * r.denominator
+                    };
+                }
+                continue;
+            }
+
+            auto exponent = extractExponent(temp, factor);
+            if (!exponent) {
+                groups.push_back({1, 1, factor});
+                continue;
+            }
+
+            bool merged = false;
+            for (auto& group : groups) {
+                if (structurallyEqual(temp, group.base, exponent->base)) {
+                    group.num = group.num * exponent->exponent.denominator + exponent->exponent.numerator * group.den;
+                    group.den = group.den * exponent->exponent.denominator;
+                    i64 gcd = std::gcd(std::abs(group.num), std::abs(group.den));
+                    if (gcd > 0) { group.num /= gcd; group.den /= gcd; }
+                    merged = true;
+                    break;
+                }
+            }
+            if (!merged) {
+                groups.push_back({exponent->exponent.numerator, exponent->exponent.denominator, exponent->base });
+            }
+        }
+
+        // rebuild
+        std::vector<NodeID> rebuilt;
+
+        if (numericCoefficient && !isOne(*numericCoefficient)) {
+            rebuilt.push_back(output.addRational(numericCoefficient->numerator, numericCoefficient->denominator));
+        }
+        
+        for (const auto& group : groups) {
+            if (group.num == 0) continue; // vanish x^0 = 1
+
+            NodeID base = cloneSubtree(temp, group.base, output);
+
+            if (group.num == 1 && group.den == 1) {
+                rebuilt.push_back(base);
+            } else {
+                rebuilt.push_back(makePower(output, base, output.addRational(group.num, group.den)));
+            }
+        }
+
+        if (rebuilt.empty()) {
+            return output.addRational(1, 1);
+        }
+
+        // fold into right-leaning multiply chain
+        NodeID result = rebuilt.back();
+        for (i8 i = (i8)rebuilt.size() - 2; i >= 0; i--) {
+            result = makeProduct(output, rebuilt[i], result);
+        }
+        return result;
+    }
+    
+    if (auto c = getCall(input, id)) {
+        std::vector<NodeID> args;
+        args.reserve(c->args.size());
+        for (const NodeID& arg : c->args) {
+            args.emplace_back(collectExponents(input, arg, output));
+        }
+        return output.addCall(c->fKind, args);
+    }
+    
     return cloneSubtree(input, id, output);
 }
 
@@ -629,12 +788,13 @@ NodeID canonicalizeLogExp(const AST& input, const NodeID id, AST& output) {
                     NodeID lnB = output.addCall(FunctionKind::NaturalLogarithm, {bp->right});
                     return makeSum(output, lnA, lnB);
                 }
-
+                /*
                 if (bp->bKind == BinaryOpKind::Divide) {
                     NodeID lnA = output.addCall(FunctionKind::NaturalLogarithm, {bp->left});
                     NodeID lnB = output.addCall(FunctionKind::NaturalLogarithm, {bp->right});
                     return makeSum(output, lnA, makeNeg(output, lnB));
                 }
+                */
 
                 if (bp->bKind == BinaryOpKind::Power) {
                     NodeID lnBase = output.addCall(FunctionKind::NaturalLogarithm, {bp->left});
